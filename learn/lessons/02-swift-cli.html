@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Swift CLIs and SPM — memwatch learn</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <span><a href="../index.html">memwatch / learn</a></span>
+    <span>lesson 2 / 4</span>
+  </nav>
+
+  <main>
+    <h1><span class="prefix">02.</span> Swift CLIs and SPM</h1>
+    <p class="lede">If you've only ever opened <code>.xcodeproj</code> files, this is the gap that closes here. Swift can absolutely live without Xcode — and on the command line, that's the only sensible way.</p>
+
+    <h2>Swift Package Manager is a build system, not just a dependency manager</h2>
+    <p>
+      In an iOS app you usually use SPM <em>through</em> Xcode — File → Add Packages, and a third-party library shows up. That's a small fraction of what SPM does. SPM is a full, standalone build system. With one file (<code>Package.swift</code>) and a directory layout, it can build executables, libraries, and tests, with no Xcode involved.
+    </p>
+    <p>
+      memwatch is built this way. There is no <code>.xcodeproj</code>. The CLI you're going to ship is produced by <code>swift build -c release</code> straight from a <span class="callout" data-target="cb-manifest">Package.swift</span> manifest.
+    </p>
+    <div class="callout-body" id="cb-manifest">
+      The manifest is itself a Swift file — at the top is <code>// swift-tools-version: 5.10</code>, which tells SPM which compiler to interpret it with. The file imports <code>PackageDescription</code> and constructs a <code>Package</code> value. SPM evaluates this file before building anything else.
+    </div>
+
+    <h2>Anatomy of memwatch's Package.swift</h2>
+    <p>This is your actual manifest, annotated. Click any underlined term:</p>
+
+    <pre><code>// swift-tools-version: 5.10
+import PackageDescription
+
+let package = Package(
+    name: "memwatch",
+    platforms: [.macOS(.v14)],
+    <span class="callout" data-target="cb-products">products</span>: [
+        .executable(name: "memwatch", targets: ["memwatch"]),
+        .library(name: "MemwatchCore", targets: ["MemwatchCore"]),
+        .library(name: "MemwatchMCP", targets: ["MemwatchMCP"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+    ],
+    <span class="callout" data-target="cb-targets">targets</span>: [
+        .<span class="callout" data-target="cb-exectarget">executableTarget</span>(
+            name: "memwatch",
+            dependencies: [
+                "MemwatchCore",
+                "MemwatchMCP",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ]
+        ),
+        .target(name: "MemwatchCore"),
+        .target(name: "MemwatchMCP", dependencies: ["MemwatchCore"]),
+    ]
+)</code></pre>
+
+    <div class="callout-body" id="cb-products">
+      <strong>products</strong> are the things the package builds and exposes to the outside world. <code>.executable</code> produces a runnable binary; <code>.library</code> produces a static or dynamic library that another package could link. memwatch is one executable plus two libraries that the executable consumes.
+    </div>
+
+    <div class="callout-body" id="cb-targets">
+      <strong>targets</strong> are the actual compilation units. Each target maps to a directory under <code>Sources/</code> by default — a target named <code>memwatch</code> reads <code>Sources/memwatch/</code>. Targets list dependencies on other targets in the package or on external products from <code>dependencies</code>.
+    </div>
+
+    <div class="callout-body" id="cb-exectarget">
+      <strong>.executableTarget</strong> vs plain <strong>.target</strong> is the meaningful distinction: only <code>.executableTarget</code> produces a binary with an entry point (a <code>main</code> function). Library targets do not, and trying to put a <code>@main</code> in one is an error. The executable depends on the libraries; the libraries don't depend on each other beyond what's declared.
+    </div>
+
+    <h2>Where does <code>main()</code> live?</h2>
+    <p>
+      Look at <code>Sources/memwatch/Memwatch.swift</code> in your repo:
+    </p>
+    <pre><code>@main
+struct Memwatch: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "memwatch",
+        abstract: "snapshot and diff iOS simulator heap state",
+        subcommands: [Snapshot.self, Diff.self, List.self, Clear.self, MCP.self]
+    )
+}</code></pre>
+
+    <p>
+      No <code>func main()</code>. No <code>main.swift</code>. The <span class="callout" data-target="cb-main">@main</span> attribute does it. <code>AsyncParsableCommand</code> ships a <code>static func main() async</code> that the attribute hooks into; the program's actual entry point becomes "parse <code>argv</code>, dispatch to the matching subcommand, run it."
+    </p>
+    <div class="callout-body" id="cb-main">
+      <code>@main</code> is a Swift language attribute, not a swift-argument-parser thing. It marks one type as the program's entry point, expecting a <code>static func main()</code> on it. The async variant exists because Swift's top-level entry now supports awaiting tasks.
+    </div>
+
+    <p>
+      Each subcommand is its own struct. Here's <code>Snapshot</code>, simplified:
+    </p>
+    <pre><code>struct Snapshot: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "snapshot",
+        abstract: "capture heap state and tag it"
+    )
+
+    @Option(name: .shortAndLong) var tag: String
+    @Option(name: .shortAndLong) var bundle: String
+    @Option(name: .shortAndLong) var simulator: String?
+
+    func run() async throws {
+        // here be the real logic, in Phase 2c
+    }
+}</code></pre>
+
+    <p>
+      <code>@Option</code> declares a flag that takes a value (<code>--tag foo</code>). <code>@Argument</code> would declare a positional. <code>@Flag</code> declares a boolean (<code>--yes</code>). swift-argument-parser uses these property wrappers + reflection to generate help text, parse <code>argv</code>, validate types, and call your <code>run()</code>.
+    </p>
+
+    <h2>Why <code>async throws</code> on <code>run()</code>?</h2>
+    <p>
+      Two reasons:
+    </p>
+    <ul>
+      <li><strong>throws</strong> — any error you throw from <code>run()</code> propagates out as a non-zero exit code. You don't write your own error-handling top level. Errors that conform to <code>LocalizedError</code> get printed nicely.</li>
+      <li><strong>async</strong> — memwatch is going to spawn child processes (<code>heap</code>, <code>leaks</code>, <code>xcrun</code>) and read their output streams. <span class="callout" data-target="cb-async">Async</span> lets you <code>await</code> the child to finish without blocking a thread.</li>
+    </ul>
+    <div class="callout-body" id="cb-async">
+      Same Swift Concurrency you use in apps. <code>async</code>/<code>await</code>, <code>Task</code>, structured concurrency. The CLI runtime gives you a top-level async context for free; you just write <code>func run() async throws</code> and you can await inside.
+    </div>
+
+    <h2>The build cycle in three commands</h2>
+    <p>Walk through what happens at the shell:</p>
+
+    <div class="diagram stepper" id="build-stepper">
+      <svg viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg">
+        <g class="step" data-caption="swift build — compiles Sources/ to .build/debug/, fetches dependencies on first run.">
+          <rect x="20" y="40" width="120" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="80" y="60" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">Sources/</text>
+          <text x="80" y="78" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">your code</text>
+
+          <text x="180" y="68" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">→ swiftc →</text>
+
+          <rect x="240" y="40" width="220" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="350" y="60" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">.build/debug/memwatch</text>
+          <text x="350" y="78" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">unsigned binary, debug info</text>
+
+          <text x="240" y="140" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">$ swift build</text>
+        </g>
+        <g class="step" data-caption="swift run memwatch ARGS — builds (if needed) then executes the binary, forwarding ARGS as argv.">
+          <rect x="20" y="40" width="120" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="80" y="60" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">Sources/</text>
+          <rect x="240" y="40" width="220" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="350" y="60" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">.build/debug/memwatch</text>
+          <text x="180" y="68" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">→</text>
+          <rect x="80" y="120" width="380" height="50" rx="3" fill="none" stroke="#1f7a4d" stroke-width="1.3"/>
+          <text x="270" y="140" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">stdout: "saved snapshot 'menu' (pid 49281, 1247 classes)"</text>
+          <text x="270" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">exit 0</text>
+          <text x="20" y="195" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">$ swift run memwatch snapshot --tag menu --bundle com.example.app</text>
+        </g>
+        <g class="step" data-caption="swift build -c release — optimized binary in .build/release/. This is what you copy to /usr/local/bin/.">
+          <rect x="20" y="40" width="120" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="80" y="60" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">Sources/</text>
+
+          <text x="180" y="68" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">→ swiftc -O →</text>
+
+          <rect x="240" y="40" width="220" height="50" rx="3" fill="none" stroke="#1f7a4d" stroke-width="1.3"/>
+          <text x="350" y="60" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">.build/release/memwatch</text>
+          <text x="350" y="78" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">optimized, no debug info</text>
+
+          <rect x="80" y="120" width="380" height="40" rx="3" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="270" y="135" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">cp .build/release/memwatch /usr/local/bin/</text>
+          <text x="270" y="152" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">→ user can run `memwatch` from anywhere</text>
+
+          <text x="20" y="195" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">$ swift build -c release</text>
+        </g>
+      </svg>
+      <div class="diagram-step"></div>
+      <div class="diagram-controls">
+        <button class="step-prev">← prev</button>
+        <span class="step-counter">1 / 3</span>
+        <button class="step-next">next →</button>
+      </div>
+    </div>
+
+    <h2>Why three targets?</h2>
+    <p>
+      memwatch has three Sources directories: the <code>memwatch</code> executable, <code>MemwatchCore</code> library, and <code>MemwatchMCP</code> library. Why split it?
+    </p>
+    <p>
+      The executable target should own only the CLI surface: argument parsing, subcommand dispatch, printing. Everything domain-y — running the heap tool, parsing its output, modeling a snapshot, computing a diff — lives in <code>MemwatchCore</code>. That makes <code>MemwatchCore</code> trivially testable: tests link against the library directly without going through <code>argv</code>, the file system, or a child process.
+    </p>
+    <p>
+      <code>MemwatchMCP</code> is a separate library because the MCP server is a different consumer of the same core. The CLI calls <code>SnapshotStore.save(...)</code>; the MCP server, when handling a <code>tools/call</code> request, calls the same function. Splitting MCP into its own library means you could imagine someone using <code>MemwatchMCP</code> from a different Swift host one day — but the more immediate value is just clean separation of concerns.
+    </p>
+
+    <form class="quiz" data-lesson="02-swift-cli">
+      <h3>quiz — 3 questions</h3>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">1. What does <code>.executableTarget(...)</code> do that plain <code>.target(...)</code> doesn't?</div>
+        <label><input type="radio" name="q1" value="a"> Enables async/await — <code>.target</code> is sync-only.</label>
+        <label><input type="radio" name="q1" value="b"> Produces a runnable binary with an entry point.</label>
+        <label><input type="radio" name="q1" value="c"> Auto-includes ArgumentParser as a dependency.</label>
+        <label><input type="radio" name="q1" value="d"> Marks the target as the test runner.</label>
+        <div class="quiz-feedback">A library target compiles to a static archive with no <code>main</code>. <code>.executableTarget</code> is the one that lets you put <code>@main</code> on a type.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">2. memwatch has no <code>main.swift</code> and no explicit <code>main()</code> function. What runs first when you execute the binary?</div>
+        <label><input type="radio" name="q2" value="a"> ArgumentParser inserts a <code>main()</code> via property-wrapper magic.</label>
+        <label><input type="radio" name="q2" value="b"> The <code>@main</code> attribute on <code>Memwatch</code> uses its inherited <code>static func main() async</code>.</label>
+        <label><input type="radio" name="q2" value="c"> SPM auto-generates a <code>main.swift</code> at build time.</label>
+        <label><input type="radio" name="q2" value="d"> Each <code>AsyncParsableCommand</code> file is treated as a possible entry point.</label>
+        <div class="quiz-feedback"><code>@main</code> is the language feature; <code>AsyncParsableCommand</code> provides the static <code>main()</code> implementation that <code>@main</code> calls.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">3. After <code>swift build -c release</code> succeeds, the binary ships from:</div>
+        <label><input type="radio" name="q3" value="a"> <code>/usr/local/bin/memwatch</code> — SPM installs it for you.</label>
+        <label><input type="radio" name="q3" value="b"> <code>.build/release/memwatch</code> in the package directory.</label>
+        <label><input type="radio" name="q3" value="c"> <code>~/Library/Developer/Xcode/DerivedData/...</code></label>
+        <label><input type="radio" name="q3" value="d"> Inside a hidden cache under <code>Package.resolved</code>.</label>
+        <div class="quiz-feedback">SPM never installs anything globally. The release binary is a single self-contained file in <code>.build/release/</code>; you copy it wherever you want it on PATH.</div>
+      </fieldset>
+
+      <button class="grade-btn" type="submit">grade</button>
+      <div class="quiz-summary"></div>
+    </form>
+
+    <div class="next-lesson">
+      next: <a href="03-shell-tools.html">03. Apple shell tools →</a>
+    </div>
+  </main>
+
+  <script src="../assets/app.js"></script>
+</body>
+</html>

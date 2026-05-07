@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JSON-RPC, MCP, and the big picture — memwatch learn</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <span><a href="../index.html">memwatch / learn</a></span>
+    <span>lesson 4 / 4</span>
+  </nav>
+
+  <main>
+    <h1><span class="prefix">04.</span> JSON-RPC, MCP, and the big picture</h1>
+    <p class="lede">memwatch's CLI is the foreground product. The MCP server is the multiplier — it lets an AI coding agent see what your app sees about itself. Here's the wire protocol and why it matters.</p>
+
+    <h2>JSON-RPC 2.0: a tiny RPC encoding</h2>
+    <p>
+      JSON-RPC is a 9-page <span class="callout" data-target="cb-rpc">RPC</span> protocol that says: the client sends a JSON object describing a method call, the server sends back a JSON object describing the result. That's it. No HTTP. No URLs. No verbs. Just message exchange.
+    </p>
+    <div class="callout-body" id="cb-rpc">
+      Remote Procedure Call — the umbrella for "make a function call across a process boundary." gRPC, JSON-RPC, XML-RPC, OpenAPI/REST when used as an RPC, MCP — all variations on the same idea.
+    </div>
+
+    <p>A request:</p>
+    <pre><code>{ "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+  "params": { "name": "memwatch_diff", "arguments": { "before": "menu", "after": "level1" } } }</code></pre>
+    <p>A response:</p>
+    <pre><code>{ "jsonrpc": "2.0", "id": 7,
+  "result": { "content": [{ "type": "text", "text": "ClassName ΔCount ΔBytes\nSCNNode +247 +198KB ..." }] } }</code></pre>
+
+    <p>Three rules carry essentially the entire protocol:</p>
+    <ul>
+      <li>Every message has <code>"jsonrpc": "2.0"</code>.</li>
+      <li>Every <strong>request</strong> has an <code>id</code> (any string or number); the response carries the same <code>id</code> so clients can match them up.</li>
+      <li>Messages without an <code>id</code> are <strong>notifications</strong> — fire-and-forget; the server doesn't reply. Useful for "I'm ready" / "I'm done" / "log this" signals.</li>
+    </ul>
+    <p>
+      Errors look like <code>{ "jsonrpc": "2.0", "id": 7, "error": { "code": -32601, "message": "Method not found" } }</code>. The <span class="callout" data-target="cb-errcodes">error codes</span> are standardized.
+    </p>
+    <div class="callout-body" id="cb-errcodes">
+      <code>-32700</code> Parse error · <code>-32600</code> Invalid Request · <code>-32601</code> Method not found · <code>-32602</code> Invalid params · <code>-32603</code> Internal error. Application-defined errors live in <code>-32000</code> to <code>-32099</code>.
+    </div>
+
+    <h2>Stdio framing: newline-delimited JSON</h2>
+    <p>
+      JSON-RPC says nothing about transport. MCP picks one: each message is a single line of JSON, terminated by <code>\n</code>, written to the server's <code>stdin</code>; replies come out of <code>stdout</code> the same way. Logs and warnings go to <code>stderr</code> — and only stderr, because <strong>any byte of non-JSON on stdout corrupts the protocol</strong>. Print a debug line to stdout in an MCP server and the client throws a parse error.
+    </p>
+    <p>
+      That's why <code>memwatch mcp</code>'s spec says "log to stderr ONLY." It's not a stylistic choice; stdout is the wire.
+    </p>
+
+    <h2>Why an agent launches memwatch over stdio</h2>
+    <p>
+      Cursor, Claude Code, and similar agents follow a config file (e.g. <code>~/.cursor/mcp.json</code>):
+    </p>
+    <pre><code>{
+  "mcpServers": {
+    "memwatch": {
+      "command": "/usr/local/bin/memwatch",
+      "args": ["mcp", "--bundle", "com.eyalg.GhostMaze"]
+    }
+  }
+}</code></pre>
+    <p>
+      When the agent starts, it spawns each configured server as a child process, hooks up <code>stdin</code>/<code>stdout</code>/<code>stderr</code>, and runs the JSON-RPC handshake. From that point on, the agent can call any tool the server advertises.
+    </p>
+
+    <h2>The MCP handshake</h2>
+    <p>MCP is JSON-RPC plus a specific set of methods. The opening exchange:</p>
+
+    <div class="diagram stepper" id="mcp-handshake">
+      <svg viewBox="0 0 480 220" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g class="step" data-caption="1. Client → server: initialize. Client states its protocol version and capabilities.">
+          <text x="20" y="30" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">CLIENT (Cursor)              SERVER (memwatch)</text>
+          <line x1="60" y1="50" x2="60" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="380" y1="50" x2="380" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="60" y1="80" x2="380" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow)"/>
+          <text x="220" y="73" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">→ initialize { protocolVersion: "2025-..." }</text>
+        </g>
+        <g class="step" data-caption="2. Server → client: result. Server confirms protocol version and lists capabilities (tools, resources, prompts).">
+          <text x="20" y="30" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">CLIENT (Cursor)              SERVER (memwatch)</text>
+          <line x1="60" y1="50" x2="60" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="380" y1="50" x2="380" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="60" y1="80" x2="380" y2="80" stroke="#6b7178" stroke-width="1"/>
+          <text x="220" y="73" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">→ initialize { ... }</text>
+          <line x1="380" y1="110" x2="60" y2="110" stroke="#1f7a4d" stroke-width="1.3"/>
+          <text x="220" y="103" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#1f7a4d">← result { capabilities: { tools: {} }, serverInfo: { name: "memwatch" } }</text>
+        </g>
+        <g class="step" data-caption="3. Client → server: notifications/initialized. Notification (no id), no reply expected. The handshake is now complete.">
+          <text x="20" y="30" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">CLIENT (Cursor)              SERVER (memwatch)</text>
+          <line x1="60" y1="50" x2="60" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="380" y1="50" x2="380" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="60" y1="80" x2="380" y2="80" stroke="#6b7178" stroke-width="1"/>
+          <text x="220" y="73" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">→ initialize</text>
+          <line x1="380" y1="110" x2="60" y2="110" stroke="#6b7178" stroke-width="1"/>
+          <text x="220" y="103" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">← result</text>
+          <line x1="60" y1="140" x2="380" y2="140" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow)"/>
+          <text x="220" y="133" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">→ notifications/initialized  (no id, no reply)</text>
+        </g>
+        <g class="step" data-caption="4. Client asks: tools/list. Server returns the catalog of callable tools with their JSON schemas.">
+          <text x="20" y="30" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">CLIENT (Cursor)              SERVER (memwatch)</text>
+          <line x1="60" y1="50" x2="60" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="380" y1="50" x2="380" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="60" y1="80" x2="380" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow)"/>
+          <text x="220" y="73" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">→ tools/list</text>
+          <line x1="380" y1="110" x2="60" y2="110" stroke="#1f7a4d" stroke-width="1.3"/>
+          <text x="220" y="103" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#1f7a4d">← tools: [memwatch_snapshot, memwatch_diff, memwatch_current, memwatch_leaks]</text>
+        </g>
+        <g class="step" data-caption="5. Client calls a tool. tools/call name + arguments → server runs the work, returns content.">
+          <text x="20" y="30" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">CLIENT (Cursor)              SERVER (memwatch)</text>
+          <line x1="60" y1="50" x2="60" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="380" y1="50" x2="380" y2="200" stroke="#6b7178" stroke-dasharray="2,3"/>
+          <line x1="60" y1="80" x2="380" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow)"/>
+          <text x="220" y="73" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">→ tools/call { name: "memwatch_diff", arguments: { before: "menu", after: "level1" } }</text>
+          <text x="220" y="120" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">(server runs heap, parses, computes diff)</text>
+          <line x1="380" y1="160" x2="60" y2="160" stroke="#1f7a4d" stroke-width="1.3"/>
+          <text x="220" y="153" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#1f7a4d">← result { content: [{ type: "text", text: "ClassName ΔCount ΔBytes ..." }] }</text>
+        </g>
+      </svg>
+      <div class="diagram-step"></div>
+      <div class="diagram-controls">
+        <button class="step-prev">← prev</button>
+        <span class="step-counter">1 / 5</span>
+        <button class="step-next">next →</button>
+      </div>
+    </div>
+
+    <h2>memwatch's four MCP tools</h2>
+    <p>The server advertises these in <code>tools/list</code>; each maps to a function in <code>MemwatchCore</code>:</p>
+    <ul>
+      <li><code>memwatch_snapshot(tag, bundle)</code> — capture and persist, returns summary</li>
+      <li><code>memwatch_diff(before, after)</code> — compute and return the diff table as text</li>
+      <li><code>memwatch_current(bundle)</code> — top-20 allocators right now, no persistence</li>
+      <li><code>memwatch_leaks(bundle)</code> — run <code>leaks</code> and return parsed summary + raw output</li>
+    </ul>
+    <p>
+      Each tool maps to a JSON Schema in <code>tools/list</code> so the agent knows what arguments are valid. Argument validation happens client-side (the agent won't pass unknown fields) but the server still validates because nothing prevents a malformed call.
+    </p>
+
+    <h2>The big picture: why the agent + memwatch is more than either alone</h2>
+    <p>
+      An AI coding agent has access to your entire source tree. It can see <code>GhostController.swift</code>'s closures, read every <code>weak</code> annotation, follow your navigation graph through code. What it cannot see is what's <em>actually live in memory right now</em>. Static analysis can suspect a retain cycle; only runtime data can confirm it.
+    </p>
+    <p>
+      memwatch alone gives a human the heap diff but stops at presentation. The human still has to map "247 SCNNodes leaked" back to "which closure in <code>GhostController.swift</code>." That's the boring detective work.
+    </p>
+    <p>
+      Combine them — agent has source, memwatch has heap, both in one conversation — and the loop closes:
+    </p>
+    <pre><code>YOU:    take a snapshot tagged 'menu'
+AGENT:  → memwatch_snapshot { tag: "menu" }
+        ✓ saved snapshot 'menu' (pid 49281, 1247 classes)
+
+YOU:    [navigate into level 1, then back to menu]
+        diff menu against now
+
+AGENT:  → memwatch_snapshot { tag: "back" }
+        → memwatch_diff { before: "menu", after: "back" }
+        I see SCNNode +12, GhostController +1, SCNGeometry +18 between
+        the two snapshots. Looking at <span class="heap-bad">GhostController.swift:84</span>, the
+        completion block on `loadGhosts` captures `self` strongly.
+        Adding [weak self] would break the retain cycle. Want me to?
+
+YOU:    yes</code></pre>
+
+    <p>
+      That's it. That's why memwatch ships an MCP server even though the diff workflow is already great as a CLI for humans. The MCP layer turns memwatch from a tool into a sense organ for an agent that already has eyes for code.
+    </p>
+
+    <h2>End-to-end architecture</h2>
+    <pre class="ascii">
+   ┌──────────────────┐
+   │ Cursor / Claude  │
+   │      Code        │       (your editor; reads source code; speaks JSON-RPC over stdio)
+   └────────┬─────────┘
+            │ stdin/stdout (newline-delimited JSON)
+   ┌────────▼─────────┐
+   │ memwatch mcp     │
+   │  ┌────────────┐  │
+   │  │ MCPServer  │  │       (handshake, route methods)
+   │  ├────────────┤  │
+   │  │   Tools    │  │       (memwatch_snapshot, _diff, _current, _leaks)
+   │  ├────────────┤  │
+   │  │MemwatchCore│  │       (Resolvers, Shell, HeapParser, SnapshotStore)
+   │  └─────┬──────┘  │
+   └────────┼─────────┘
+            │ Process + Pipe
+   ┌────────▼─────────┐
+   │ xcrun simctl     │
+   │ heap, leaks      │
+   │ swift-demangle   │       (Apple's command-line tools)
+   └────────┬─────────┘
+            │ Mach: task_for_pid, virtual memory introspection
+   ┌────────▼─────────┐
+   │ Your iOS app     │
+   │ in the simulator │       (a regular Mac process — heap is just memory)
+   └──────────────────┘</pre>
+
+    <form class="quiz" data-lesson="04-mcp">
+      <h3>quiz — 3 questions</h3>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">1. JSON-RPC distinguishes a <em>request</em> (expects a reply) from a <em>notification</em> (no reply) by:</div>
+        <label><input type="radio" name="q1" value="a"> The method name prefix (<code>notifications/</code> means notification).</label>
+        <label><input type="radio" name="q1" value="b"> The presence or absence of an <code>id</code> field in the message.</label>
+        <label><input type="radio" name="q1" value="c"> A <code>type</code> field set to <code>"request"</code> or <code>"notification"</code>.</label>
+        <label><input type="radio" name="q1" value="d"> HTTP method — POST is request, PATCH is notification.</label>
+        <div class="quiz-feedback">No <code>id</code> = no reply expected. The <code>notifications/</code> prefix is an MCP convention but the wire-level distinction is whether <code>id</code> is present.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">2. Why must <code>memwatch mcp</code>'s logs go to stderr, never stdout?</div>
+        <label><input type="radio" name="q2" value="a"> stdout has lower throughput than stderr.</label>
+        <label><input type="radio" name="q2" value="b"> stdout is the JSON-RPC wire — any non-protocol bytes corrupt it.</label>
+        <label><input type="radio" name="q2" value="c"> The MCP spec forbids stdout output.</label>
+        <label><input type="radio" name="q2" value="d"> Cursor only reads stderr from MCP servers.</label>
+        <div class="quiz-feedback">The client expects every line on stdout to be a valid JSON-RPC message. A stray <code>print("hello")</code> = client-side parse error and a broken connection.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">3. The unique value of memwatch-as-MCP-server (vs. memwatch-as-CLI alone) is:</div>
+        <label><input type="radio" name="q3" value="a"> The MCP server is faster than the CLI.</label>
+        <label><input type="radio" name="q3" value="b"> An agent gets source-code context <em>and</em> runtime heap state in the same session.</label>
+        <label><input type="radio" name="q3" value="c"> MCP encrypts data in transit between agent and tool.</label>
+        <label><input type="radio" name="q3" value="d"> It eliminates the need to run heap or leaks.</label>
+        <div class="quiz-feedback">Static analysis suspects retain cycles; only runtime data confirms one. memwatch supplies the runtime side; the agent supplies the static side.</div>
+      </fieldset>
+
+      <button class="grade-btn" type="submit">grade</button>
+      <div class="quiz-summary"></div>
+    </form>
+
+    <div class="next-lesson">
+      <a href="../index.html">← back to index</a> · you've covered everything memwatch is built on
+    </div>
+  </main>
+
+  <script src="../assets/app.js"></script>
+</body>
+</html>

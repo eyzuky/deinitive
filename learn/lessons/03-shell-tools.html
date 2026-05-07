@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apple shell tools — memwatch learn</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <span><a href="../index.html">memwatch / learn</a></span>
+    <span>lesson 3 / 4</span>
+  </nav>
+
+  <main>
+    <h1><span class="prefix">03.</span> The tools Xcode is hiding from you</h1>
+    <p class="lede">When you hit Run in Xcode, a dozen command-line tools fire off in sequence. memwatch doesn't have an Xcode to hide behind — it calls those same tools directly. Here's what each one does.</p>
+
+    <h2>The simulator is a regular process on your Mac</h2>
+    <p>
+      Critical mental model shift: the iOS Simulator is not a virtual machine. It's a regular Mac process tree. The iOS frameworks (<code>UIKit</code>, <code>SceneKit</code>, etc.) are reimplemented to run natively on macOS. When you run your app on the iPhone 15 simulator, your app's binary is an x86-64 or arm64 Mach-O executable running on your Mac, with a regular Mac PID, talking to the same kernel as Safari and Slack.
+    </p>
+    <p>
+      That's <em>why</em> memwatch can attach to it with <code>heap</code> and <code>leaks</code> — those are standard <span class="callout" data-target="cb-mach">Mach</span>-process tools that work on any Mac process. If your app actually ran on a simulated ARM CPU inside a hypervisor, none of this would work.
+    </p>
+    <div class="callout-body" id="cb-mach">
+      Mach is the kernel core macOS is built on (plus a BSD layer on top). Tools like <code>heap</code>, <code>leaks</code>, <code>vmmap</code>, and <code>sample</code> use Mach APIs (<code>task_for_pid</code>, virtual memory introspection) to inspect a running process's memory without its cooperation. You don't have to add anything to your app for them to work.
+    </div>
+
+    <h2>xcrun: the toolchain umbrella</h2>
+    <p>
+      You have multiple Xcode versions, multiple toolchains, multiple SDKs. <span class="callout" data-target="cb-xcrun">xcrun</span> is the dispatcher that finds the right binary for the current developer dir. You can call most tools both with and without it — <code>heap</code>, <code>leaks</code>, and <code>simctl</code> are all on PATH after Command Line Tools are installed — but going through <code>xcrun</code> is the convention because it picks the version matching your active Xcode.
+    </p>
+    <div class="callout-body" id="cb-xcrun">
+      <code>xcrun --find heap</code> tells you which binary it would invoke. <code>xcrun --sdk iphonesimulator --find clang</code> would point at the simulator-targeting clang. Switch between Xcodes with <code>sudo xcode-select -s /Applications/Xcode-beta.app</code>.
+    </div>
+
+    <h2>simctl: drive the simulator from the command line</h2>
+    <p>
+      <code>xcrun simctl</code> is your handle to the simulator from outside Xcode. The subcommands you'll care about for memwatch:
+    </p>
+    <pre><code>$ xcrun simctl list devices booted -j
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-17-2" : [
+      {
+        "udid" : "1A2B3C4D-...",
+        "state" : "Booted",
+        "name" : "iPhone 15"
+      }
+    ]
+  }
+}</code></pre>
+    <p>
+      <code>list devices booted -j</code> returns JSON describing every booted simulator. Parsing the first <code>udid</code> out of this is how memwatch gets the simulator handle when you don't pass <code>--simulator</code>.
+    </p>
+    <p>Other commands you'll see:</p>
+    <ul>
+      <li><code>simctl boot &lt;udid&gt;</code> — boot a sim that's shut down</li>
+      <li><code>simctl launch &lt;udid&gt; &lt;bundle-id&gt;</code> — start your app on the sim, returns its <span class="callout" data-target="cb-pid">PID</span></li>
+      <li><code>simctl get_app_container &lt;udid&gt; &lt;bundle-id&gt;</code> — find the app's filesystem sandbox</li>
+      <li><code>simctl listapps &lt;udid&gt;</code> — every app installed on that sim, by bundle id</li>
+    </ul>
+    <div class="callout-body" id="cb-pid">
+      A process identifier — a small integer assigned by the kernel to each running process. This is how every other tool in this lesson references the target: <code>heap 49281</code>, <code>leaks 49281</code>. memwatch's job before running any introspection tool is "translate this bundle id into a PID."
+    </div>
+
+    <h2>heap: every live allocation, by class</h2>
+    <p>
+      The headline tool. Given a PID, <code>heap</code> walks every <span class="callout" data-target="cb-mallocz">malloc zone</span> in that process and emits a per-class summary of every live allocation: how many instances exist and how much memory they collectively use.
+    </p>
+    <div class="callout-body" id="cb-mallocz">
+      An allocator-internal grouping of allocations. The default zone holds most of your normal allocations; specialized zones hold things like CoreFoundation strings or specific framework caches. <code>heap</code> reports them separately but the summary table aggregates by class regardless of zone.
+    </div>
+
+    <p>The summary table — the part memwatch parses — looks like this:</p>
+    <pre><code>Process 49281: <em>2,847 nodes malloced for 8,124 KB</em>
+
+       COUNT    BYTES  AVG   CLASS_NAME
+       =====    =====  ===   ==========
+         482  983,040  2.0K  CFString
+         247  198,400  812   <span class="heap-bad">SCNNode</span>
+         187   12,016  64    UIView
+         154    9,856  64    NSConcreteMutableData
+          18   89,344  4.9K  <span class="heap-bad">SCNGeometry</span>
+          12  124,928  10.2K <span class="heap-bad">GhostController</span>
+           ...</code></pre>
+
+    <p>
+      That's the parseable signal. Per row: count, bytes, average, class name. memwatch's <code>HeapParser</code> reads this table line-by-line and emits a <code>[HeapClassEntry]</code>. Header lines and zone breakdowns get skipped — anything that doesn't match the four-column pattern is ignored silently because Apple has changed the surrounding text between Xcode releases and the contract is "skip noise, never crash."
+    </p>
+    <p>
+      Then a snapshot taken later is just another <code>[HeapClassEntry]</code>, and the diff is <em>per-class subtraction</em> on count and bytes. That's the entire pipeline.
+    </p>
+
+    <h2>leaks: definitively-orphaned blocks</h2>
+    <p>
+      Where <code>heap</code> shows everything that's alive, <code>leaks</code> shows specifically the allocations that <em>nothing</em> points at — they're live in memory but no reference graph node anywhere reaches them. That's a strict superset of "buggy" but a strict subset of "wrong" — a retain cycle leak isn't reported by <code>leaks</code> because each object in the cycle <em>is</em> referenced (by the other one). <code>heap</code> diff catches retain cycles; <code>leaks</code> catches abandoned allocations.
+    </p>
+    <p>
+      <code>leaks</code> output is more verbose — full call stacks, malloc histories. It's slow (it walks the entire reference graph to determine reachability). memwatch keeps it as an on-demand tool exposed over MCP, not part of the snapshot path.
+    </p>
+
+    <h2>swift-demangle: turning <code>$s5...</code> into something a human can read</h2>
+    <p>
+      Swift symbols in the binary look like <code>$s7MyApp14GhostControllerC4tickyyF</code>. That's a deterministic encoding of <code>MyApp.GhostController.tick()</code> (module, type, method, signature). The compiler produces those names; tools that walk the binary see them. <span class="callout" data-target="cb-demangle">swift-demangle</span> reverses the mapping.
+    </p>
+    <div class="callout-body" id="cb-demangle">
+      <code>$ echo '$s7MyApp14GhostControllerC4tickyyF' | xcrun swift-demangle</code> prints <code>MyApp.GhostController.tick() -&gt; ()</code>. Pipe-friendly, supports both line-by-line and inline-substitution modes.
+    </div>
+    <p>
+      <code>heap</code>'s class names from a Swift app are sometimes already demangled, sometimes not — depends on the metadata. memwatch shells out to <code>xcrun swift-demangle</code> when it sees a mangled name. There's no public Swift library API for demangling, so shelling out is the supported path.
+    </p>
+
+    <h2>How memwatch composes them</h2>
+    <p>This is what runs end-to-end when you type <code>memwatch snapshot --tag menu --bundle com.example.app</code>:</p>
+
+    <div class="diagram stepper" id="snapshot-flow">
+      <svg viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg">
+        <g class="step" data-caption="Step 1 — Find the booted simulator's UDID by parsing simctl JSON output.">
+          <text x="20" y="40" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">memwatch</text>
+          <text x="40" y="60" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">└── Process</text>
+          <text x="80" y="80" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">→ xcrun simctl list devices booted -j</text>
+          <text x="80" y="100" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">← stdout: { "devices": ... "udid": "1A2B..." }</text>
+          <text x="80" y="125" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">parse JSON → udid = "1A2B..."</text>
+        </g>
+        <g class="step" data-caption="Step 2 — Translate bundle id into a PID.">
+          <text x="20" y="40" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">memwatch</text>
+          <text x="40" y="60" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">└── Process</text>
+          <text x="80" y="80" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">→ xcrun simctl listapps 1A2B...</text>
+          <text x="80" y="100" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">← validate com.example.app exists</text>
+          <text x="80" y="125" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">→ resolve PID via process lookup</text>
+          <text x="80" y="145" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">pid = 49281</text>
+        </g>
+        <g class="step" data-caption="Step 3 — Run heap, capture stdout.">
+          <text x="20" y="40" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">memwatch</text>
+          <text x="40" y="60" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">└── Process</text>
+          <text x="80" y="80" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">→ heap 49281</text>
+          <text x="80" y="100" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">← stdout: full heap dump (~50 KB of text)</text>
+          <text x="80" y="125" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">HeapParser → [HeapClassEntry]</text>
+          <text x="80" y="145" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">  CFString: 482 instances, 983 KB</text>
+          <text x="80" y="160" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">  SCNNode: 247 instances, 198 KB ...</text>
+        </g>
+        <g class="step" data-caption="Step 4 — Save snapshot under .memwatch/snapshots/menu.json.">
+          <text x="20" y="40" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="currentColor">memwatch</text>
+          <text x="40" y="60" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">└── SnapshotStore</text>
+          <text x="80" y="80" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">→ JSONEncoder → write file</text>
+          <text x="80" y="100" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">  .memwatch/snapshots/menu.json</text>
+          <text x="80" y="130" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">stdout: saved snapshot 'menu' (pid 49281, 1247 classes)</text>
+          <text x="80" y="150" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">exit 0</text>
+        </g>
+      </svg>
+      <div class="diagram-step"></div>
+      <div class="diagram-controls">
+        <button class="step-prev">← prev</button>
+        <span class="step-counter">1 / 4</span>
+        <button class="step-next">next →</button>
+      </div>
+    </div>
+
+    <h2>How Swift shells out: <code>Process</code> and <code>Pipe</code></h2>
+    <p>
+      Foundation ships <span class="callout" data-target="cb-process">Process</span>, the Swift wrapper for <code>fork</code>+<code>exec</code>. You configure executable, arguments, environment, then attach <code>Pipe</code>s to capture stdout/stderr.
+    </p>
+    <div class="callout-body" id="cb-process">
+      Same Foundation type that's been there since OpenStep, just renamed from <code>NSTask</code>. macOS-only-ish (Process exists on Linux but the spawning semantics differ slightly). Async-friendly via Swift Concurrency: you can <code>await</code> the child to terminate without spinning a thread.
+    </div>
+    <p>
+      memwatch wraps this in a <code>Shell</code> helper with one method: <code>run(_ cmd: String, _ args: [String]) async throws -&gt; (stdout: String, stderr: String, exitCode: Int32)</code>. Every shell-out goes through it, so the simulator-resolution path, the heap path, and the leaks path share one well-tested code path.
+    </p>
+
+    <form class="quiz" data-lesson="03-shell-tools">
+      <h3>quiz — 3 questions</h3>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">1. The iPhone 15 simulator runs your app as:</div>
+        <label><input type="radio" name="q1" value="a"> A guest VM running an iOS image under a hypervisor.</label>
+        <label><input type="radio" name="q1" value="b"> A regular Mac process with iOS frameworks reimplemented to run natively.</label>
+        <label><input type="radio" name="q1" value="c"> An ARM-emulated environment via QEMU.</label>
+        <label><input type="radio" name="q1" value="d"> A privileged kernel extension.</label>
+        <div class="quiz-feedback">That's exactly why <code>heap</code>, <code>leaks</code>, etc. — generic Mach-process tools — work against it.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="c">
+        <div class="q-text">2. Which signal does the diff between two <code>heap</code> snapshots catch that <code>leaks</code> would miss?</div>
+        <label><input type="radio" name="q2" value="a"> A buffer overflow in CoreFoundation.</label>
+        <label><input type="radio" name="q2" value="b"> An allocation that nothing in memory references.</label>
+        <label><input type="radio" name="q2" value="c"> A retain cycle — both objects are referenced (by each other) so neither is "abandoned."</label>
+        <label><input type="radio" name="q2" value="d"> Stack-allocated values that escaped the function scope.</label>
+        <div class="quiz-feedback"><code>leaks</code> reports unreachable allocations. Retain cycles are <em>reachable</em> from one another, so they're not unreachable — but they're still wrong, and they show up as a positive count delta on the round-trip <code>heap</code> diff.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">3. Why does memwatch shell out to <code>xcrun swift-demangle</code> instead of importing a demangle library?</div>
+        <label><input type="radio" name="q3" value="a"> Apple doesn't ship a demangle implementation.</label>
+        <label><input type="radio" name="q3" value="b"> The demangle implementation isn't part of Swift's public API surface; the binary is the supported path.</label>
+        <label><input type="radio" name="q3" value="c"> The library is GPL-licensed.</label>
+        <label><input type="radio" name="q3" value="d"> Demangling only works at compile time.</label>
+        <div class="quiz-feedback">There's a private Swift module that contains demangling code, but it's not stable and not exported. The binary is what Apple commits to.</div>
+      </fieldset>
+
+      <button class="grade-btn" type="submit">grade</button>
+      <div class="quiz-summary"></div>
+    </form>
+
+    <div class="next-lesson">
+      next: <a href="04-mcp.html">04. JSON-RPC, MCP, and the big picture →</a>
+    </div>
+  </main>
+
+  <script src="../assets/app.js"></script>
+</body>
+</html>

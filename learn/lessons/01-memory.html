@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>iOS memory — memwatch learn</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <span><a href="../index.html">memwatch / learn</a></span>
+    <span>lesson 1 / 4</span>
+  </nav>
+
+  <main>
+    <h1><span class="prefix">01.</span> iOS memory: heap, leak, diff</h1>
+    <p class="lede">You already know ARC and <code>weak</code>. This lesson reframes those for the question a profiler asks: <em>what's still alive that shouldn't be?</em></p>
+
+    <h2>Heap growth is not a leak</h2>
+    <p>
+      The heap is the region of process memory where reference-counted objects live. Every <code>UIView</code>, every <code>SCNNode</code>, every <code>NSMutableData</code> — they're all on the heap. <span class="callout" data-target="cb-arc">ARC</span> increments a refcount when you assign a strong reference and decrements when that reference goes out of scope. When the count hits zero, the object is freed.
+    </p>
+    <div class="callout-body" id="cb-arc">
+      Automatic Reference Counting. The compiler inserts <code>retain</code>/<code>release</code> calls around your code so you don't have to manage memory by hand. It's still refcounting under the hood — there's no garbage collector running. Each object knows its own count.
+    </div>
+
+    <p>
+      So when your app's heap grows, that's not by itself a problem. The user navigated into a level → 247 SceneKit nodes loaded → heap grew 200 KB. That's the level loading. Expected.
+    </p>
+    <p>
+      A <strong>leak</strong> is something else: an object whose refcount <em>should</em> have hit zero, but didn't, because something is still holding a strong reference to it. The user navigated <em>back</em> from the level — but the 247 nodes are still alive in memory, costing you 200 KB you'll never reclaim.
+    </p>
+
+    <h2>The canonical leak: navigate-and-back</h2>
+    <p>
+      Almost every leak you'll hunt in a production iOS app fits this shape:
+    </p>
+    <pre><code>1. user is on screen A
+2. user navigates to screen B (allocates objects)
+3. user navigates back to screen A
+4. you expect screen B's objects to be freed
+5. some are not — that's the leak</code></pre>
+    <p>
+      The classic cause is a <span class="callout" data-target="cb-cycle">retain cycle</span>: two objects holding strong references to each other. Neither's refcount can ever drop to zero, so ARC never frees them.
+    </p>
+    <div class="callout-body" id="cb-cycle">
+      The compiler can't detect cycles for you because at compile time it can't know which references are "owning." That's why <code>[weak self]</code> in closures and <code>weak var delegate</code> on protocols are conventions you apply manually.
+    </div>
+
+    <p>The diagram below walks through one of these cycles forming and being broken:</p>
+
+    <div class="diagram stepper" id="cycle-stepper">
+      <svg viewBox="0 0 480 220" xmlns="http://www.w3.org/2000/svg" aria-label="retain cycle progression">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="arrow-weak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7178"/>
+          </marker>
+        </defs>
+
+        <g class="step" data-caption="Step 1 — ParentVC owns a ChildVM. Refcount of ChildVM = 1.">
+          <rect x="40" y="80" width="140" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="110" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">ParentVC</text>
+          <text x="110" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">refcount: 1</text>
+
+          <rect x="300" y="80" width="140" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="370" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">ChildVM</text>
+          <text x="370" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">refcount: 1</text>
+
+          <line x1="180" y1="110" x2="295" y2="110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <text x="237" y="100" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">strong</text>
+        </g>
+
+        <g class="step" data-caption="Step 2 — ChildVM stores a closure that captures self (ParentVC). Closure holds ParentVC strongly. Refcount of ParentVC = 2.">
+          <rect x="40" y="80" width="140" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="110" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">ParentVC</text>
+          <text x="110" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#b3261e">refcount: 2</text>
+
+          <rect x="300" y="80" width="140" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="370" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">ChildVM</text>
+          <text x="370" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6b7178">refcount: 1</text>
+
+          <line x1="180" y1="100" x2="295" y2="100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <text x="237" y="92" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">strong</text>
+
+          <line x1="295" y1="125" x2="180" y2="125" stroke="#b3261e" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <text x="237" y="143" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#b3261e">strong (closure)</text>
+        </g>
+
+        <g class="step" data-caption="Step 3 — ParentVC pops. Navigation stack drops its reference. Both refcounts are still ≥ 1 because each holds the other. Neither can deallocate.">
+          <rect x="40" y="80" width="140" height="60" rx="4" fill="none" stroke="#b3261e" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <text x="110" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="#b3261e">ParentVC</text>
+          <text x="110" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#b3261e">refcount: 1 (leaked)</text>
+
+          <rect x="300" y="80" width="140" height="60" rx="4" fill="none" stroke="#b3261e" stroke-width="1.5" stroke-dasharray="4,3"/>
+          <text x="370" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="#b3261e">ChildVM</text>
+          <text x="370" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#b3261e">refcount: 1 (leaked)</text>
+
+          <line x1="180" y1="100" x2="295" y2="100" stroke="#b3261e" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <line x1="295" y1="125" x2="180" y2="125" stroke="#b3261e" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <text x="240" y="40" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#b3261e">cycle — neither can ever reach 0</text>
+        </g>
+
+        <g class="step" data-caption="Step 4 — Closure declared with [weak self]. ChildVM's reference back to ParentVC is now weak (doesn't count). When nav stack drops ParentVC, refcount → 0, deinit fires, and ChildVM follows.">
+          <rect x="40" y="80" width="140" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="110" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">ParentVC</text>
+          <text x="110" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">refcount: 1 → 0 ✓</text>
+
+          <rect x="300" y="80" width="140" height="60" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="370" y="105" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="13" fill="currentColor">ChildVM</text>
+          <text x="370" y="124" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1f7a4d">refcount: 1 → 0 ✓</text>
+
+          <line x1="180" y1="100" x2="295" y2="100" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)"/>
+          <text x="237" y="92" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="currentColor">strong</text>
+
+          <line x1="295" y1="125" x2="180" y2="125" stroke="#6b7178" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow-weak)"/>
+          <text x="237" y="143" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6b7178">weak (uncounted)</text>
+        </g>
+      </svg>
+      <div class="diagram-step"></div>
+      <div class="diagram-controls">
+        <button class="step-prev">← prev</button>
+        <span class="step-counter">1 / 4</span>
+        <button class="step-next">next →</button>
+      </div>
+    </div>
+
+    <h2>Why diffing snapshots is the right unit</h2>
+    <p>
+      You can't see a leak from one heap snapshot. A snapshot of "after navigating into a level" shows 247 SceneKit nodes — fine, that's the level. The question is: <em>after I navigate back, are they still there?</em>
+    </p>
+    <p>
+      That's why memwatch's primary verb is <code>diff</code>, not <code>snapshot</code>. The snapshot is the raw input; the diff is the answer. Here's the mental model:
+    </p>
+    <pre class="ascii">
+   menu          level1         menu (after)
+     │             │                  │
+     ├─snapshot ───┤                  │
+     │   "menu"    │                  │
+     │             ├──snapshot ───────┤
+     │             │   "level1"       │
+     │             │                  ├──snapshot ─→
+     │             │                  │   "back"
+     │             │                  │
+     └─────────────┴──diff menu back──┘
+                       (← any positive Δ here is a leak)</pre>
+
+    <p>
+      The diff between <code>menu</code> and <code>back</code> is the <span class="callout" data-target="cb-roundtrip">round-trip residue</span>. Anything with a positive count delta there is something the round trip allocated and never released. The diff between <code>menu</code> and <code>level1</code> is just "what loading the level cost" — interesting, but not a bug signal.
+    </p>
+    <div class="callout-body" id="cb-roundtrip">
+      In the canonical workflow you take three snapshots: at the menu, at the deepest screen you navigated to, and back at the menu. The first→third diff is the leak signal. The first→second diff is the working set of the visited screen.
+    </div>
+
+    <h2>What the heap tool sees that you can't from inside the app</h2>
+    <p>
+      From <em>inside</em> your app, you can ask "is this object still alive" only by holding a reference to it — which itself keeps it alive. You're inside the system you're trying to measure.
+    </p>
+    <p>
+      From <em>outside</em>, the <code>heap &lt;pid&gt;</code> tool walks every malloc zone in the target process and reports every live allocation: classified by class, with counts and total bytes. It sees what your app can't see about itself: the actual graph of live objects, including the ones nothing in your code remembers anymore but that something else is still pinning.
+    </p>
+    <p>
+      That's what the next two lessons get into: how the simulator is a separate process you can attach tools to (lesson 3), and how memwatch composes those tools into a one-line workflow (lesson 2 sets up the Swift CLI plumbing).
+    </p>
+
+    <form class="quiz" data-lesson="01-memory">
+      <h3>quiz — 3 questions</h3>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">1. ARC frees an object when:</div>
+        <label><input type="radio" name="q1" value="a"> the user has been idle for some threshold</label>
+        <label><input type="radio" name="q1" value="b"> its refcount reaches zero</label>
+        <label><input type="radio" name="q1" value="c"> the next memory warning arrives</label>
+        <label><input type="radio" name="q1" value="d"> its <code>deinit</code> is called</label>
+        <div class="quiz-feedback">Refcount reaching zero is the trigger; <code>deinit</code> is what runs <em>because</em> of it, not what causes it.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">2. You snapshot <code>menu</code> (count: 100), navigate to a level and snapshot <code>level</code> (count: 250), then navigate back and snapshot <code>back</code> (count: 150). Which is true?</div>
+        <label><input type="radio" name="q2" value="a"> The level definitely has a leak.</label>
+        <label><input type="radio" name="q2" value="b"> The level might have a leak — 50 objects didn't release on the way back.</label>
+        <label><input type="radio" name="q2" value="c"> No leak — count is close enough to the baseline.</label>
+        <label><input type="radio" name="q2" value="d"> You can't tell from this data.</label>
+        <div class="quiz-feedback">The 50-object delta between <code>menu</code> and <code>back</code> is the round-trip residue. It might be expected (e.g., a cache pre-warmed) but it's the right place to look.</div>
+      </fieldset>
+
+      <fieldset class="quiz-q" data-correct="b">
+        <div class="q-text">3. Why is positive heap growth between two snapshots <em>not</em> always a leak?</div>
+        <label><input type="radio" name="q3" value="a"> Heap snapshots include stack-allocated values.</label>
+        <label><input type="radio" name="q3" value="b"> Some objects (caches, singletons, lazy loads) intentionally outlive a navigation.</label>
+        <label><input type="radio" name="q3" value="c"> ARC runs lazily — the snapshot is too early.</label>
+        <label><input type="radio" name="q3" value="d"> <code>heap</code> double-counts shared objects.</label>
+        <div class="quiz-feedback">A senior dev reading the diff judges whether each ΔClass is expected. memwatch shows the data; you decide what's a leak.</div>
+      </fieldset>
+
+      <button class="grade-btn" type="submit">grade</button>
+      <div class="quiz-summary"></div>
+    </form>
+
+    <div class="next-lesson">
+      next: <a href="02-swift-cli.html">02. Swift CLIs and SPM →</a>
+    </div>
+  </main>
+
+  <script src="../assets/app.js"></script>
+</body>
+</html>

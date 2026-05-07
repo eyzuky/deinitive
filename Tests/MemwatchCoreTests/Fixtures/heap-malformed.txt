@@ -1,0 +1,11 @@
+Process 49281: garbage line that doesn't conform
+
+       COUNT    BYTES  AVG   CLASS_NAME
+       =====    =====  ===   ==========
+         482  983040   2.0K  CFString
+not a valid row at all
+         247  198400   812   SCNNode
+         abc  198400   812   ShouldBeSkipped
+          12  124928   10.2K GhostController
+
+trailing footer text after the blank line

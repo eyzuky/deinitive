@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>memwatch — learn</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <nav class="topnav">
+    <span>memwatch / learn</span>
+    <span><span id="overall-progress">0 / 4 lessons complete</span> · <a href="#" id="reset-progress">reset</a></span>
+  </nav>
+
+  <main>
+    <h1><span class="prefix">$</span> memwatch --learn</h1>
+    <p class="lede">Four lessons. Each takes ~10–15 min and ends with a quiz. Progress saves locally in your browser.</p>
+
+    <h2>What you're building</h2>
+    <p>
+      memwatch is a Swift CLI that captures the iOS simulator's heap, names the snapshot, then diffs two snapshots to surface objects that didn't release. The same operations are exposed over MCP so AI coding agents can ground memory-bug debugging in real heap state instead of guessing.
+    </p>
+    <p>
+      You already know how to write iOS apps. These lessons fill the OS-side and tooling-side gaps the project assumes you have: how the heap is laid out at runtime, how Swift programs work outside an Xcode project, how Apple's command-line tools see into a running process, and what JSON-RPC and MCP actually are.
+    </p>
+
+    <h2>Lessons</h2>
+    <ol class="lesson-list">
+      <li data-lesson="01-memory">
+        <span class="dot">○</span>
+        <div>
+          <a href="lessons/01-memory.html">iOS memory: ARC, retain cycles, leaks</a>
+          <div class="blurb">Heap vs. leak, the navigate-and-back bug, what diffing two snapshots actually catches.</div>
+        </div>
+      </li>
+      <li data-lesson="02-swift-cli">
+        <span class="dot">○</span>
+        <div>
+          <a href="lessons/02-swift-cli.html">Swift CLIs and SPM</a>
+          <div class="blurb">Swift outside Xcode: Package.swift, executable targets, ArgumentParser, async <code>run()</code>.</div>
+        </div>
+      </li>
+      <li data-lesson="03-shell-tools">
+        <span class="dot">○</span>
+        <div>
+          <a href="lessons/03-shell-tools.html">Apple shell tools</a>
+          <div class="blurb"><code>xcrun simctl</code>, <code>heap</code>, <code>leaks</code>, <code>swift-demangle</code> — what they show and how memwatch parses them.</div>
+        </div>
+      </li>
+      <li data-lesson="04-mcp">
+        <span class="dot">○</span>
+        <div>
+          <a href="lessons/04-mcp.html">JSON-RPC, MCP, and the big picture</a>
+          <div class="blurb">How agents call tools, the MCP handshake, and why memwatch + an agent &gt; either alone.</div>
+        </div>
+      </li>
+    </ol>
+
+    <hr>
+
+    <h3>How to read this</h3>
+    <p>
+      <span class="callout" data-target="cb-callout-help">Underlined dotted terms</span> are clickable — they expand inline definitions for jargon that matters but doesn't deserve a full lesson.
+    </p>
+    <div class="callout-body" id="cb-callout-help">
+      Like this. Click again to collapse. Use these for quick refreshers without breaking your reading flow.
+    </div>
+    <p>
+      Diagrams with <span class="kbd">prev</span> / <span class="kbd">next</span> buttons walk through a sequence — click through them; they're the closest thing to "running it" you'll get inside the browser.
+    </p>
+    <p>
+      Each lesson ends with three multiple-choice questions. They're sanity checks, not gotchas — getting them right means you've got enough to move on.
+    </p>
+  </main>
+
+  <footer>
+    static site, no tracking, all progress lives in your browser's localStorage.
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
