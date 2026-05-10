@@ -1,5 +1,15 @@
 # memwatch
 
+[![Swift 5.10+](https://img.shields.io/badge/Swift-5.10+-orange.svg)](https://swift.org)
+[![macOS 14+](https://img.shields.io/badge/macOS-14+-blue.svg)](#)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![MCP 2025-11-25](https://img.shields.io/badge/MCP-2025--11--25-purple.svg)](https://modelcontextprotocol.io)
+
+iOS simulator memory profiling in two commands. Snapshot the heap, navigate, snapshot again, diff. Plus an MCP server so coding agents (Cursor, Claude Code) can hunt leaks alongside reading your source.
+
+<!-- demo GIF — record per the script in examples/LeakLab/README.md and replace this line -->
+<!-- ![demo](docs/memwatch-demo.gif) -->
+
 ```
 $ memwatch start --bundle com.example.app
 
@@ -15,31 +25,54 @@ Step 3 of 3 — navigate back to the baseline screen.
 Press Enter when ready: 
 captured 1264 classes (8.4 MB)
 
-Round-trip residue (baseline → after):
+════════════════════════════════════════════════════════════════
+memwatch start: round-trip residue (baseline → after)
+════════════════════════════════════════════════════════════════
+
+▸ Probably your code (2 classes)
 
 ClassName                   ΔCount  ΔBytes
 ──────────────────────────────────────────
-SCNNode                       +247  +198 KB
 GhostController                +12  +124 KB
-SCNGeometry                    +18   +89 KB
-UIImage                         +3   +12 KB
-NSConcreteMutableData           +2    +8 KB
-──────────────────────────────────────────
-                                     +431 KB
+ChildVM                         +3    +96 B
 
-Saved as start-baseline, start-peak, start-post.
+▸ All classes (top 20 by |ΔBytes|)
+
+ClassName                      ΔCount  ΔBytes
+─────────────────────────────────────────────
+SCNNode                          +247  +198 KB
+GhostController                   +12  +124 KB
+SCNGeometry                       +18   +89 KB
+UIImage                            +3   +12 KB
+NSConcreteMutableData              +2    +8 KB
+ChildVM                            +3    +96 B
+─────────────────────────────────────────────
+                                       +431 KB
 ```
 
-Memory profiler for the iOS simulator. `memwatch start` walks you through a baseline → flow → back round trip and prints what didn't release. Commands return in seconds. memwatch also ships an MCP server so coding agents can call the same operations alongside reading your source.
+`memwatch start` walks you through a baseline → flow → back round trip and prints what didn't release. The "Probably your code" section pulls user-defined classes out of the noise so you don't squint past 200 rows of `NSConcreteMutableData` churn.
 
 ## install
 
+### Homebrew (recommended)
+
 ```
-swift build -c release
-cp .build/release/memwatch /opt/homebrew/bin/   # or sudo cp …/usr/local/bin/
+brew install eyzuky/memwatch/memwatch
 ```
 
-Requires macOS 14+ and Xcode Command Line Tools (`xcode-select --install`).
+### Prebuilt binary
+
+Download `memwatch-v0.1.0-arm64.tar.gz` from [Releases](https://github.com/eyzuky/memwatch/releases) and copy to `/opt/homebrew/bin/`.
+
+### From source
+
+```
+git clone https://github.com/eyzuky/memwatch && cd memwatch
+swift build -c release
+cp .build/release/memwatch /opt/homebrew/bin/
+```
+
+Requires macOS 14+ (Apple Silicon) and Xcode Command Line Tools (`xcode-select --install`).
 
 ## commands
 
