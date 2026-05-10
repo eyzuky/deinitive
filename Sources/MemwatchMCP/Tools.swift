@@ -5,6 +5,7 @@ struct ToolDefinition {
     let name: String
     let description: String
     let inputSchema: [String: Any]
+    let annotations: [String: Any]
 }
 
 enum ToolRegistry {
@@ -19,6 +20,16 @@ enum ToolRegistry {
                     "bundle": ["type": "string", "description": "Bundle identifier of the running simulator app. Defaults to the value passed to `memwatch mcp --bundle`."] as [String: Any]
                 ] as [String: Any],
                 "required": ["tag"]
+            ],
+            // Writes a small JSON file in the user's cwd; calling twice with the same tag
+            // overwrites (mildly destructive in the data-loss sense, but routine workflow);
+            // each call samples a different heap state so not idempotent. Touches the sim.
+            annotations: [
+                "title": "Capture heap snapshot",
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": true,
             ]
         ),
         ToolDefinition(
@@ -33,6 +44,15 @@ enum ToolRegistry {
                     "top": ["type": "integer", "description": "Show only the top N rows by abs(\u{0394}Bytes). 0 = unlimited. Defaults to 20."] as [String: Any]
                 ] as [String: Any],
                 "required": ["before", "after"]
+            ],
+            // Pure function over two saved files. Same inputs always produce same output.
+            // No external state.
+            annotations: [
+                "title": "Diff two snapshots",
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false,
             ]
         ),
         ToolDefinition(
@@ -45,6 +65,15 @@ enum ToolRegistry {
                     "all": ["type": "boolean", "description": "If true, include framework warmup classes that are otherwise filtered. Defaults to false."] as [String: Any],
                     "top": ["type": "integer", "description": "Maximum rows to return. 0 = unlimited. Defaults to 20."] as [String: Any]
                 ] as [String: Any]
+            ],
+            // Reads the sim's heap; doesn't write anywhere. Heap state changes between
+            // calls, so not idempotent.
+            annotations: [
+                "title": "Top heap allocators (no save)",
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": true,
             ]
         ),
         ToolDefinition(
@@ -55,6 +84,14 @@ enum ToolRegistry {
                 "properties": [
                     "bundle": ["type": "string", "description": "Bundle identifier. Defaults to the value passed to `memwatch mcp --bundle`."] as [String: Any]
                 ] as [String: Any]
+            ],
+            // Runs Apple's `leaks` and returns its output. No persistence. Heap state varies.
+            annotations: [
+                "title": "Run Apple `leaks` tool",
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": true,
             ]
         )
     ]
@@ -64,7 +101,8 @@ enum ToolRegistry {
             [
                 "name": def.name,
                 "description": def.description,
-                "inputSchema": def.inputSchema
+                "inputSchema": def.inputSchema,
+                "annotations": def.annotations
             ]
         }
     }
