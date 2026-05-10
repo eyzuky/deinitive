@@ -40,7 +40,9 @@ public enum BytesFormatter {
 }
 
 public enum DiffFormatter {
-    public static func format(_ deltas: [ClassDelta], colorize: Bool? = nil) -> String {
+    public static let defaultMaxClassNameWidth = 50
+
+    public static func format(_ deltas: [ClassDelta], colorize: Bool? = nil, maxClassNameWidth: Int = defaultMaxClassNameWidth) -> String {
         let useColor = colorize ?? ANSI.stdoutIsTTY
 
         let header = (className: "ClassName", count: "ΔCount", bytes: "ΔBytes")
@@ -48,7 +50,7 @@ public enum DiffFormatter {
         let rows: [(className: String, count: String, bytes: String, delta: ClassDelta)] =
             deltas.map { d in
                 (
-                    className: d.className,
+                    className: truncate(d.className, to: maxClassNameWidth),
                     count: formatCount(d.countDelta),
                     bytes: BytesFormatter.format(d.bytesDelta, signed: true),
                     delta: d
@@ -103,6 +105,11 @@ public enum DiffFormatter {
     private static func formatCount(_ count: Int) -> String {
         if count == 0 { return "0" }
         return count > 0 ? "+\(count)" : "\(count)"
+    }
+
+    public static func truncate(_ name: String, to maxChars: Int) -> String {
+        guard maxChars > 1, name.count > maxChars else { return name }
+        return String(name.prefix(maxChars - 1)) + "…"
     }
 }
 

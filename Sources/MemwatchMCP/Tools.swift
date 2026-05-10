@@ -23,25 +23,27 @@ enum ToolRegistry {
         ),
         ToolDefinition(
             name: "memwatch_diff",
-            description: "Compute the per-class delta between two saved snapshots. Positive deltas after a navigation round-trip are leak suspects. Framework warmup classes (Auto Layout solver, glyph caches, runtime metadata, etc.) are filtered out by default; pass all=true to see everything.",
+            description: "Compute the per-class delta between two saved snapshots. Positive deltas after a navigation round-trip are leak suspects. Framework warmup classes (Auto Layout solver, glyph caches, runtime metadata, etc.) are filtered out by default; pass all=true to see everything. Returns up to top rows; pass top=0 for unlimited.",
             inputSchema: [
                 "type": "object",
                 "properties": [
                     "before": ["type": "string", "description": "Earlier snapshot tag."] as [String: Any],
                     "after": ["type": "string", "description": "Later snapshot tag."] as [String: Any],
-                    "all": ["type": "boolean", "description": "If true, include framework warmup classes that are otherwise filtered. Defaults to false."] as [String: Any]
+                    "all": ["type": "boolean", "description": "If true, include framework warmup classes that are otherwise filtered. Defaults to false."] as [String: Any],
+                    "top": ["type": "integer", "description": "Show only the top N rows by abs(\u{0394}Bytes). 0 = unlimited. Defaults to 20."] as [String: Any]
                 ] as [String: Any],
                 "required": ["before", "after"]
             ]
         ),
         ToolDefinition(
             name: "memwatch_current",
-            description: "Capture the current heap and return the top-20 allocators without persisting. Useful for one-off spot checks. Framework warmup classes are filtered by default; pass all=true to see everything.",
+            description: "Capture the current heap and return the top allocators without persisting. Framework warmup classes are filtered by default; pass all=true to see everything. Default cap is 20 rows; pass top to override.",
             inputSchema: [
                 "type": "object",
                 "properties": [
                     "bundle": ["type": "string", "description": "Bundle identifier. Defaults to the value passed to `memwatch mcp --bundle`."] as [String: Any],
-                    "all": ["type": "boolean", "description": "If true, include framework warmup classes that are otherwise filtered. Defaults to false."] as [String: Any]
+                    "all": ["type": "boolean", "description": "If true, include framework warmup classes that are otherwise filtered. Defaults to false."] as [String: Any],
+                    "top": ["type": "integer", "description": "Maximum rows to return. 0 = unlimited. Defaults to 20."] as [String: Any]
                 ] as [String: Any]
             ]
         ),
@@ -121,32 +123,51 @@ enum ToolDispatcher {
             return toolError("missing 'after' argument")
         }
         let showAll = (args["all"] as? Bool) ?? false
+        let topLimit = (args["top"] as? Int) ?? 20
         let store = SnapshotStore()
         let beforeSnap = try store.load(tag: before)
         let afterSnap = try store.load(tag: after)
         let computed = HeapDiff.compute(before: beforeSnap.heap, after: afterSnap.heap)
 
-        let deltas: [ClassDelta]
-        let hidden: Int
+        let allDeltas: [ClassDelta]
+        let frameworkHidden: Int
         if showAll {
-            deltas = computed
-            hidden = 0
+            allDeltas = computed
+            frameworkHidden = 0
         } else {
             let result = NoiseFilter.defaultFramework.apply(to: computed)
-            deltas = result.kept
-            hidden = result.droppedCount
+            allDeltas = result.kept
+            frameworkHidden = result.droppedCount
         }
 
-        if deltas.isEmpty {
-            if hidden > 0 {
-                return toolText("no differences after filtering (\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass all=true to show)")
+        let displayed: [ClassDelta]
+        let belowFold: Int
+        if topLimit > 0 && allDeltas.count > topLimit {
+            displayed = Array(allDeltas.prefix(topLimit))
+            belowFold = allDeltas.count - topLimit
+        } else {
+            displayed = allDeltas
+            belowFold = 0
+        }
+
+        if displayed.isEmpty {
+            if frameworkHidden > 0 {
+                return toolText("no differences after filtering (\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass all=true to show)")
             }
             return toolText("no differences between '\(before)' and '\(after)'")
         }
 
-        var output = DiffFormatter.format(deltas, colorize: false)
-        if hidden > 0 {
-            output += "\n\n(\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass all=true to show)"
+        var output = DiffFormatter.format(displayed, colorize: false)
+        var notes: [String] = []
+        if frameworkHidden > 0 {
+            notes.append("\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass all=true to show")
+        }
+        if belowFold > 0 {
+            notes.append("\(belowFold) more row\(belowFold == 1 ? "" : "s") below the top \(topLimit) — pass top=0 to show")
+        }
+        if !notes.isEmpty {
+            output += "\n"
+            for note in notes { output += "\n(\(note))" }
         }
         return toolText(output)
     }
@@ -156,6 +177,7 @@ enum ToolDispatcher {
             return toolError("missing 'bundle' argument and no default bundle was set on `memwatch mcp --bundle`")
         }
         let showAll = (args["all"] as? Bool) ?? false
+        let topLimit = (args["top"] as? Int) ?? 20
         let entries = try await CurrentOperation.run(bundleID: bundle, simulatorUDID: context.defaultSimulator)
 
         let filteredEntries: [HeapClassEntry]
@@ -169,14 +191,24 @@ enum ToolDispatcher {
             hidden = result.droppedCount
         }
 
-        let top = Array(filteredEntries.sorted { $0.totalBytes > $1.totalBytes }.prefix(20))
+        let sortedAll = filteredEntries.sorted { $0.totalBytes > $1.totalBytes }
+        let top: [HeapClassEntry]
+        let belowFold: Int
+        if topLimit > 0 && sortedAll.count > topLimit {
+            top = Array(sortedAll.prefix(topLimit))
+            belowFold = sortedAll.count - topLimit
+        } else {
+            top = sortedAll
+            belowFold = 0
+        }
         if top.isEmpty {
             if hidden > 0 {
                 return toolText("heap returned no rows after filtering (\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass all=true to show)")
             }
             return toolText("heap returned no parseable rows")
         }
-        let nameWidth = max(9, top.map { $0.className.count }.max() ?? 0)
+        let truncatedNames = top.map { DiffFormatter.truncate($0.className, to: DiffFormatter.defaultMaxClassNameWidth) }
+        let nameWidth = max(9, truncatedNames.map { $0.count }.max() ?? 0)
         let countWidth = max(5, top.map { String($0.instanceCount).count }.max() ?? 0)
         let bytesStrs = top.map { BytesFormatter.format($0.totalBytes) }
         let bytesWidth = max(5, bytesStrs.map(\.count).max() ?? 0)
@@ -193,14 +225,22 @@ enum ToolDispatcher {
         lines.append(rule)
         for (i, entry) in top.enumerated() {
             lines.append(
-                entry.className.padded(toRight: nameWidth)
+                truncatedNames[i].padded(toRight: nameWidth)
                     + "  " + String(entry.instanceCount).padded(toLeft: countWidth)
                     + "  " + bytesStrs[i].padded(toLeft: bytesWidth)
             )
         }
         var output = lines.joined(separator: "\n")
+        var notes: [String] = []
         if hidden > 0 {
-            output += "\n\n(\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass all=true to show)"
+            notes.append("\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass all=true to show")
+        }
+        if belowFold > 0 {
+            notes.append("\(belowFold) more row\(belowFold == 1 ? "" : "s") below the top \(topLimit) — pass top=0 to show")
+        }
+        if !notes.isEmpty {
+            output += "\n"
+            for note in notes { output += "\n(\(note))" }
         }
         return toolText(output)
     }

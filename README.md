@@ -48,17 +48,17 @@ Requires macOS 14+ and Xcode Command Line Tools (`xcode-select --install`).
 ```
 memwatch start <flags>                         # interactive: baseline → flow → back, then auto-diff
 memwatch snapshot --tag <name> --bundle <id> [--simulator <udid>]
-memwatch diff <before> <after> [--no-color] [--all]
+memwatch diff <before> <after> [--no-color] [--all] [--top N]
 memwatch list
 memwatch clear [--yes]
 memwatch mcp --bundle <id> [--simulator <udid>] [--log-stderr]
 ```
 
-`memwatch start` flags: `--bundle <id>` (required), `--simulator <udid>`, `--no-color`, `--all`.
+`memwatch start` flags: `--bundle <id>` (required), `--simulator <udid>`, `--no-color`, `--all`, `--top N` (default 20, 0 = unlimited).
 
 Snapshots persist under `.memwatch/snapshots/` in the current directory. Each is a small JSON file you can commit, share, or delete. `start` always writes to `start-baseline`, `start-peak`, `start-post` — you can re-run a manual `memwatch diff start-baseline start-post` any time without re-walking the flow.
 
-`diff` filters out a curated set of iOS framework warmup classes (Auto Layout solver, glyph caches, Obj-C runtime metadata, render-tree internals, etc.) so the signal-to-noise ratio is workable out of the box. Pass `--all` to see every class. The same filter applies to the `memwatch_diff` and `memwatch_current` MCP tools — call with `all: true` to disable.
+`diff` filters out a curated set of iOS framework warmup classes (Auto Layout solver, glyph caches, Obj-C runtime metadata, render-tree internals, etc.) so the signal-to-noise ratio is workable out of the box, and shows only the top 20 rows by `abs(ΔBytes)`. Class names over 50 chars are truncated. Pass `--all` to disable the noise filter, `--top 0` to remove the row cap. The same filter and cap apply to the `memwatch_diff` and `memwatch_current` MCP tools (`all: true`, `top: 0`).
 
 ## MCP
 

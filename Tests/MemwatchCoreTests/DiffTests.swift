@@ -93,6 +93,22 @@ final class DiffTests: XCTestCase {
         XCTAssertTrue(colored.contains("\u{001B}[0m"), "expected reset ANSI sequence")
     }
 
+    func testFormatterTruncatesLongClassNames() {
+        let longName = "Swift.ReferenceWritableKeyPath<DesignLibrary.GlassMaterialProvider.Pocket.Storage, Int>"
+        let deltas = [ClassDelta(className: longName, countDelta: 1, bytesDelta: 96)]
+        let table = DiffFormatter.format(deltas, colorize: false, maxClassNameWidth: 50)
+        // The row should contain a truncated version ending in `…`, and not the full long name.
+        XCTAssertTrue(table.contains("…"))
+        XCTAssertFalse(table.contains("Pocket.Storage, Int>"))
+    }
+
+    func testTruncateHelper() {
+        XCTAssertEqual(DiffFormatter.truncate("short", to: 50), "short")
+        XCTAssertEqual(DiffFormatter.truncate(String(repeating: "x", count: 60), to: 10), "xxxxxxxxx…")
+        // Edge: maxChars < 2 leaves the name unchanged.
+        XCTAssertEqual(DiffFormatter.truncate("abc", to: 1), "abc")
+    }
+
     func testBytesFormatter() {
         XCTAssertEqual(BytesFormatter.format(0), "0 B")
         XCTAssertEqual(BytesFormatter.format(512), "512 B")

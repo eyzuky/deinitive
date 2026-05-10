@@ -24,6 +24,9 @@ struct Start: AsyncParsableCommand {
     @Flag(help: "show all classes including framework warmup noise")
     var all: Bool = false
 
+    @Option(name: .long, help: "show only the top N rows in the diff; 0 = unlimited (default 20)")
+    var top: Int = 20
+
     func run() async throws {
         // Make stdout unbuffered so prompts appear in order even when piped or captured.
         setbuf(stdout, nil)
@@ -54,33 +57,50 @@ struct Start: AsyncParsableCommand {
         _ = peak  // kept for completeness; user can `memwatch diff start-baseline start-peak` later
 
         let computed = HeapDiff.compute(before: baseline.heap, after: post.heap)
-        let deltas: [ClassDelta]
-        let hidden: Int
+        let allDeltas: [ClassDelta]
+        let frameworkHidden: Int
         if all {
-            deltas = computed
-            hidden = 0
+            allDeltas = computed
+            frameworkHidden = 0
         } else {
             let result = NoiseFilter.defaultFramework.apply(to: computed)
-            deltas = result.kept
-            hidden = result.droppedCount
+            allDeltas = result.kept
+            frameworkHidden = result.droppedCount
+        }
+
+        let displayed: [ClassDelta]
+        let belowFold: Int
+        if top > 0 && allDeltas.count > top {
+            displayed = Array(allDeltas.prefix(top))
+            belowFold = allDeltas.count - top
+        } else {
+            displayed = allDeltas
+            belowFold = 0
         }
 
         print("")
         print("Round-trip residue (baseline → after):")
         print("")
 
-        if deltas.isEmpty {
-            if hidden > 0 {
-                print("no differences after filtering (\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass --all to show)")
+        if displayed.isEmpty {
+            if frameworkHidden > 0 {
+                print("no differences after filtering (\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show)")
             } else {
                 print("clean round trip — no class delta between baseline and after.")
             }
         } else {
             let colorize: Bool? = noColor ? false : nil
-            print(DiffFormatter.format(deltas, colorize: colorize))
-            if hidden > 0 {
+            print(DiffFormatter.format(displayed, colorize: colorize))
+            var notes: [String] = []
+            if frameworkHidden > 0 {
+                notes.append("\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show")
+            }
+            if belowFold > 0 {
+                notes.append("\(belowFold) more row\(belowFold == 1 ? "" : "s") below the top \(top) — pass --top 0 to show")
+            }
+            if !notes.isEmpty {
                 print("")
-                print("(\(hidden) framework class\(hidden == 1 ? "" : "es") hidden — pass --all to show)")
+                for note in notes { print("(\(note))") }
             }
         }
 
