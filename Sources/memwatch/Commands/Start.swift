@@ -127,15 +127,17 @@ struct Start: AsyncParsableCommand {
         guard readLine() != nil else { return nil }  // EOF (Ctrl-D) → graceful cancel
 
         let started = Date()
-        let snapshot = try await SnapshotOperation.run(
-            tag: tag,
-            bundleID: bundle,
-            simulatorUDID: simulator,
-            store: store,
-            progress: { msg in
-                FileHandle.standardOutput.write(Data("  \(msg)\n".utf8))
-            }
-        )
+        let snapshot = try await withTicker {
+            try await SnapshotOperation.run(
+                tag: tag,
+                bundleID: bundle,
+                simulatorUDID: simulator,
+                store: store,
+                progress: { msg in
+                    FileHandle.standardOutput.write(Data("  \(msg)\n".utf8))
+                }
+            )
+        }
         let elapsed = Date().timeIntervalSince(started)
         let total = BytesFormatter.format(snapshot.totalBytes)
         print("  captured \(snapshot.heap.count) classes (\(total)) in \(formatElapsed(elapsed))")

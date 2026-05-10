@@ -25,14 +25,16 @@ struct Snapshot: AsyncParsableCommand {
         setbuf(stdout, nil)
 
         let started = Date()
-        let snapshot = try await SnapshotOperation.run(
-            tag: tag,
-            bundleID: bundle,
-            simulatorUDID: simulator,
-            progress: { msg in
-                FileHandle.standardOutput.write(Data("\(msg)\n".utf8))
-            }
-        )
+        let snapshot = try await withTicker(indent: "") {
+            try await SnapshotOperation.run(
+                tag: tag,
+                bundleID: bundle,
+                simulatorUDID: simulator,
+                progress: { msg in
+                    FileHandle.standardOutput.write(Data("\(msg)\n".utf8))
+                }
+            )
+        }
         let elapsed = Date().timeIntervalSince(started)
         let total = BytesFormatter.format(snapshot.totalBytes)
         print("saved snapshot '\(snapshot.tag)' (pid \(snapshot.pid), \(snapshot.heap.count) classes, \(total) total) in \(formatElapsed(elapsed))")
