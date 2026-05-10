@@ -17,8 +17,10 @@ public enum UserCodeHeuristic {
         "NS", "CF", "CG", "CA", "CT", "CU", "CUI",
         // UIKit (catches UIView, UIKit.UIAnimatableProperty<...>, etc.)
         "UI",
-        // Swift runtime / std
-        "Swift.", "Observation.", "ObservationRegistrar",
+        // SwiftUI / Swift runtime / std
+        "SwiftUI", "Swift.", "Observation.", "ObservationRegistrar",
+        // C++ standard library
+        "std::",
         // Apple internal / private convention
         "_", "@", "Class.", "(",
         // Concurrency / OS internals
@@ -29,16 +31,26 @@ public enum UserCodeHeuristic {
         "IO", "ColorSync",
         // SVG / SF Symbols
         "SVG",
-        // Core Text font internals
-        "TFP", "TFile", "TGlyph", "TTrueType", "THVAR",
+        // Core Text font internals (T<uppercase> family)
+        "TFP", "TFile", "TGlyph", "TTrueType", "THVAR", "TTenuous", "TSpliced", "TChar",
+        // MaterialKit / VisualStyling private UIKit
+        "MT",
+        // Accelerate / vImage
+        "vImage",
         // Misc framework
         "PT", "Gestures.", "GlassMaterial",
+        // iOS 26+ UIKit internals that don't use the legacy `UI` prefix
+        "NavigationBar", "NavigationStack", "ButtonBar", "GlassGroup",
+        "PlatterContainer", "SDFElement", "DesignLibrary",
     ]
 
     private static let swiftBuiltins: Set<String> = [
+        // Swift std types that surface as bare names in heap output
         "Closure", "Array", "Dictionary", "Set", "String", "Int", "UInt",
         "Double", "Float", "Bool", "Optional", "Result", "Range", "Slice",
-        "ContiguousArray", "Data", "Date", "URL"
+        "ContiguousArray", "Data", "Date", "URL",
+        // Bare framework type names that show up in heap output
+        "Class", "Swift", "BridgedProperty", "Implementation",
     ]
 
     public static func isLikelyUserCode(_ className: String) -> Bool {

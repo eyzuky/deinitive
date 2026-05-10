@@ -63,6 +63,7 @@ public extension NoiseFilter {
             "CAContext",
             "CAHosting",
             "CAMediaTimingFunction",
+            "CABacking",
 
             // libdispatch / OS / XPC
             "OS_",
@@ -85,6 +86,9 @@ public extension NoiseFilter {
             "TGlyph",
             "TTrueType",
             "THVAR",
+            "TTenuous",
+            "TSpliced",
+            "TChar",
 
             // Color management
             "ColorSync",
@@ -145,6 +149,7 @@ public extension NoiseFilter {
             "NSPointerArray",
             "NSPathStore",
             "NSKeyValueMethod",
+            "NSKeyValueSlow",
             "NSKeyValueObservation",
             "NSKeyValueObservance",
             "NSKeyValueUnnestedProperty",
@@ -172,9 +177,25 @@ public extension NoiseFilter {
             // UIKit framework wrappers
             "UIKit._UIObjCEquatableBox",
 
+            // SwiftUI / MaterialKit / Accelerate / C++
+            "SwiftUI",
+            "MT",
+            "vImage",
+            "std::",
+
+            // iOS 26+ UIKit internals that don't use the legacy `UI` prefix
+            "NavigationBar",
+            "NavigationStack",
+            "ButtonBar",
+            "GlassGroup",
+            "PlatterContainer",
+            "SDFElement",
+            "DesignLibrary",
+
             // Misc
             "Gestures.",
             "GlassMaterialProvider",
+            "BridgedProperty",
         ]
     )
 }

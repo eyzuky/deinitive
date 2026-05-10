@@ -6,9 +6,12 @@ import Darwin
 
 public enum ANSI {
     public static let reset = "\u{001B}[0m"
+    public static let bold = "\u{001B}[1m"
+    public static let dim = "\u{001B}[2m"
     public static let red = "\u{001B}[31m"
     public static let green = "\u{001B}[32m"
-    public static let dim = "\u{001B}[2m"
+    public static let yellow = "\u{001B}[33m"
+    public static let cyan = "\u{001B}[36m"
 
     public static var stdoutIsTTY: Bool {
         #if canImport(Darwin)
@@ -16,6 +19,18 @@ public enum ANSI {
         #else
         return false
         #endif
+    }
+
+    public static func boldCyan(_ text: String, useColor: Bool) -> String {
+        useColor ? bold + cyan + text + reset : text
+    }
+
+    public static func boldText(_ text: String, useColor: Bool) -> String {
+        useColor ? bold + text + reset : text
+    }
+
+    public static func greenText(_ text: String, useColor: Bool) -> String {
+        useColor ? green + text + reset : text
     }
 }
 
@@ -42,7 +57,25 @@ public enum BytesFormatter {
 public enum DiffFormatter {
     public static let defaultMaxClassNameWidth = 50
 
-    public static func format(_ deltas: [ClassDelta], colorize: Bool? = nil, maxClassNameWidth: Int = defaultMaxClassNameWidth) -> String {
+    // Wraps a string in a fixed-width "═══" header bar with the given title centered (well, left-padded).
+    public static func sectionHeader(_ title: String, width: Int = 64, useColor: Bool? = nil) -> String {
+        let color = useColor ?? ANSI.stdoutIsTTY
+        let rule = String(repeating: "═", count: width)
+        let lines = [rule, title, rule]
+        return lines.map { ANSI.boldCyan($0, useColor: color) }.joined(separator: "\n")
+    }
+
+    public static func sectionLabel(_ text: String, useColor: Bool? = nil) -> String {
+        let color = useColor ?? ANSI.stdoutIsTTY
+        return ANSI.boldCyan("▸ \(text)", useColor: color)
+    }
+
+    public static func format(
+        _ deltas: [ClassDelta],
+        colorize: Bool? = nil,
+        maxClassNameWidth: Int = defaultMaxClassNameWidth,
+        highlightUserCode: Bool = true
+    ) -> String {
         let useColor = colorize ?? ANSI.stdoutIsTTY
 
         let header = (className: "ClassName", count: "ΔCount", bytes: "ΔBytes")
@@ -77,19 +110,20 @@ public enum DiffFormatter {
             let line = row.className.padded(toRight: classWidth)
                 + gutter + row.count.padded(toLeft: countWidth)
                 + gutter + row.bytes.padded(toLeft: bytesWidth)
+            let isUser = highlightUserCode && UserCodeHeuristic.isLikelyUserCode(row.delta.className)
+            let formatted: String
             if useColor {
-                let colorPrefix: String
-                if row.delta.bytesDelta > 0 {
-                    colorPrefix = ANSI.red
-                } else if row.delta.bytesDelta < 0 {
-                    colorPrefix = ANSI.green
+                if row.delta.bytesDelta < 0 {
+                    formatted = ANSI.greenText(line, useColor: true)
+                } else if isUser {
+                    formatted = ANSI.boldText(line, useColor: true)
                 } else {
-                    colorPrefix = ""
+                    formatted = line
                 }
-                lines.append(colorPrefix + line + (colorPrefix.isEmpty ? "" : ANSI.reset))
             } else {
-                lines.append(line)
+                formatted = line
             }
+            lines.append(formatted)
         }
         lines.append(rule)
 
@@ -112,33 +146,14 @@ public enum DiffFormatter {
         return String(name.prefix(maxChars - 1)) + "…"
     }
 
-    // Renders a small "Probably your code (N classes):" block listing classes whose
-    // names look user-defined (no framework prefix). Returns nil if there's nothing
-    // to surface. The caller prints this above the main diff table so the user's
-    // own leaks don't get lost in the framework long tail.
+    // Renders the small "Probably your code (N classes)" mini-table of user-defined
+    // classes (heuristically detected). Returns nil if there are no user-code rows.
+    // Pulled from the post-filter, pre-top-cap set so a tiny user leak doesn't get
+    // hidden below the --top fold.
     public static func formatUserCodeSection(_ deltas: [ClassDelta], maxClassNameWidth: Int = defaultMaxClassNameWidth) -> String? {
         let user = deltas.filter { UserCodeHeuristic.isLikelyUserCode($0.className) }
         guard !user.isEmpty else { return nil }
-
-        let truncated = user.map { truncate($0.className, to: maxClassNameWidth) }
-        let counts = user.map { formatCount($0.countDelta) }
-        let bytes = user.map { BytesFormatter.format($0.bytesDelta, signed: true) }
-
-        let nameWidth = truncated.map { $0.count }.max() ?? 0
-        let countWidth = counts.map { $0.count }.max() ?? 0
-        let bytesWidth = bytes.map { $0.count }.max() ?? 0
-
-        var lines: [String] = []
-        let label = user.count == 1 ? "Probably your code (1 class):" : "Probably your code (\(user.count) classes):"
-        lines.append(label)
-        for i in user.indices {
-            lines.append(
-                "  " + truncated[i].padded(toRight: nameWidth)
-                    + "  " + counts[i].padded(toLeft: countWidth)
-                    + "  " + bytes[i].padded(toLeft: bytesWidth)
-            )
-        }
-        return lines.joined(separator: "\n")
+        return format(user, maxClassNameWidth: maxClassNameWidth, highlightUserCode: true)
     }
 }
 

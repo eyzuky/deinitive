@@ -78,38 +78,16 @@ struct Start: AsyncParsableCommand {
             belowFold = 0
         }
 
-        print("")
-        print("Round-trip residue (baseline → after):")
-        print("")
-
-        if displayed.isEmpty {
-            if frameworkHidden > 0 {
-                print("no differences after filtering (\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show)")
-            } else {
-                print("clean round trip — no class delta between baseline and after.")
-            }
-        } else {
-            // "Probably your code" pulled from the post-filter, pre-top-cap set so a
-            // small user-code leak isn't hidden below the --top fold.
-            if let userSection = DiffFormatter.formatUserCodeSection(allDeltas) {
-                print(userSection)
-                print("")
-            }
-
-            let colorize: Bool? = noColor ? false : nil
-            print(DiffFormatter.format(displayed, colorize: colorize))
-            var notes: [String] = []
-            if frameworkHidden > 0 {
-                notes.append("\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show")
-            }
-            if belowFold > 0 {
-                notes.append("\(belowFold) more row\(belowFold == 1 ? "" : "s") below the top \(top) — pass --top 0 to show")
-            }
-            if !notes.isEmpty {
-                print("")
-                for note in notes { print("(\(note))") }
-            }
-        }
+        let useColor = noColor ? false : ANSI.stdoutIsTTY
+        printDiff(
+            title: "memwatch start: round-trip residue (baseline → after)",
+            displayed: displayed,
+            allDeltas: allDeltas,
+            frameworkHidden: frameworkHidden,
+            belowFold: belowFold,
+            top: top,
+            useColor: useColor
+        )
 
         print("")
         print("Saved as start-baseline, start-peak, start-post. Re-run `memwatch diff start-baseline start-post` any time without re-walking the flow.")

@@ -86,11 +86,24 @@ final class DiffTests: XCTestCase {
         XCTAssertTrue(lines.last!.contains("+322 KB"), "total line: \(lines.last!)")
     }
 
-    func testFormatterAppliesAnsiWhenRequested() {
-        let deltas = [ClassDelta(className: "SCNNode", countDelta: 247, bytesDelta: 198400)]
+    func testFormatterBoldsUserCodeRowsAndGreensNegatives() {
+        let deltas = [
+            ClassDelta(className: "ChildVM", countDelta: 3, bytesDelta: 96),       // user code → bold
+            ClassDelta(className: "CFString", countDelta: 100, bytesDelta: 5000),  // framework → no styling
+            ClassDelta(className: "NSArray", countDelta: -5, bytesDelta: -200),    // negative → green
+        ]
         let colored = DiffFormatter.format(deltas, colorize: true)
-        XCTAssertTrue(colored.contains("\u{001B}[31m"), "expected red ANSI sequence")
+        XCTAssertTrue(colored.contains("\u{001B}[1m"), "expected bold ANSI for user-code row")
+        XCTAssertTrue(colored.contains("\u{001B}[32m"), "expected green ANSI for negative delta")
         XCTAssertTrue(colored.contains("\u{001B}[0m"), "expected reset ANSI sequence")
+    }
+
+    func testFormatterDoesNotRedColorizePositiveFrameworkRows() {
+        // Old behavior: every positive delta was red. New behavior: only user-code rows
+        // are bolded, negatives are green. Plain framework positives have no ANSI.
+        let deltas = [ClassDelta(className: "CFString", countDelta: 100, bytesDelta: 5000)]
+        let colored = DiffFormatter.format(deltas, colorize: true)
+        XCTAssertFalse(colored.contains("\u{001B}[31m"), "framework positive rows should not be red")
     }
 
     func testFormatterTruncatesLongClassNames() {

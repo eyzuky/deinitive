@@ -49,36 +49,67 @@ struct Diff: AsyncParsableCommand {
             belowFold = 0
         }
 
-        if displayed.isEmpty {
-            if frameworkHidden > 0 {
-                print("no differences after filtering (\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show)")
-            } else {
-                print("no differences between '\(before)' and '\(after)'")
-            }
-            return
-        }
+        let useColor: Bool? = noColor ? false : nil
+        let resolvedColor = useColor ?? ANSI.stdoutIsTTY
 
-        // "Probably your code" section pulled from the post-filter, pre-top-cap set so
-        // a small (low-bytes) user-code leak doesn't get hidden below the --top fold.
-        if let userSection = DiffFormatter.formatUserCodeSection(allDeltas) {
-            print(userSection)
-            print("")
-        }
+        printDiff(
+            title: "memwatch diff: \(before) → \(after)",
+            displayed: displayed,
+            allDeltas: allDeltas,
+            frameworkHidden: frameworkHidden,
+            belowFold: belowFold,
+            top: top,
+            useColor: resolvedColor
+        )
+    }
+}
 
-        let colorize: Bool? = noColor ? false : nil
-        print(DiffFormatter.format(displayed, colorize: colorize))
-        printFooter(frameworkHidden: frameworkHidden, belowFold: belowFold)
+func printDiff(
+    title: String,
+    displayed: [ClassDelta],
+    allDeltas: [ClassDelta],
+    frameworkHidden: Int,
+    belowFold: Int,
+    top: Int,
+    useColor: Bool
+) {
+    print("")
+    print(DiffFormatter.sectionHeader(title, useColor: useColor))
+    print("")
+
+    if displayed.isEmpty {
+        if frameworkHidden > 0 {
+            print("no differences after filtering (\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show)")
+        } else {
+            print("no differences.")
+        }
+        return
     }
 
-    private func printFooter(frameworkHidden: Int, belowFold: Int) {
-        var notes: [String] = []
-        if frameworkHidden > 0 {
-            notes.append("\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show")
-        }
-        if belowFold > 0 {
-            notes.append("\(belowFold) more row\(belowFold == 1 ? "" : "s") below the top \(top) — pass --top 0 to show")
-        }
-        guard !notes.isEmpty else { return }
+    // Probably-your-code section comes first, pulled from post-filter pre-top-cap so
+    // a small user leak isn't hidden below the --top fold.
+    if let userSection = DiffFormatter.formatUserCodeSection(allDeltas) {
+        let userCount = allDeltas.filter { UserCodeHeuristic.isLikelyUserCode($0.className) }.count
+        let label = userCount == 1 ? "Probably your code (1 class)" : "Probably your code (\(userCount) classes)"
+        print(DiffFormatter.sectionLabel(label, useColor: useColor))
+        print("")
+        print(userSection)
+        print("")
+    }
+
+    let allLabel = top > 0 ? "All classes (top \(top) by |ΔBytes|)" : "All classes"
+    print(DiffFormatter.sectionLabel(allLabel, useColor: useColor))
+    print("")
+    print(DiffFormatter.format(displayed, colorize: useColor))
+
+    var notes: [String] = []
+    if frameworkHidden > 0 {
+        notes.append("\(frameworkHidden) framework class\(frameworkHidden == 1 ? "" : "es") hidden — pass --all to show")
+    }
+    if belowFold > 0 {
+        notes.append("\(belowFold) more row\(belowFold == 1 ? "" : "s") below the top \(top) — pass --top 0 to show")
+    }
+    if !notes.isEmpty {
         print("")
         for note in notes { print("(\(note))") }
     }

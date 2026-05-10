@@ -67,7 +67,6 @@ final class UserCodeHeuristicTests: XCTestCase {
         ]
         let section = DiffFormatter.formatUserCodeSection(deltas)
         XCTAssertNotNil(section)
-        XCTAssertTrue(section!.contains("Probably your code (2 classes):"))
         XCTAssertTrue(section!.contains("NotificationLeakViewController"))
         XCTAssertTrue(section!.contains("Workload"))
         // Should NOT include framework or ambiguous-builtin classes.
