@@ -36,7 +36,14 @@ public enum MemwatchError: LocalizedError {
         case .parseFailed(let msg):
             return "Parse error: \(msg)"
         case .shellTimeout(let cmd, let seconds):
-            return "Command timed out after \(Int(seconds))s: \(cmd). heap occasionally gets stuck attaching to a busy process. Try `\(cmd)` manually to see if it's responsive; if not, force-quit the simulator app and re-run."
+            return """
+                Command timed out after \(Int(seconds))s: \(cmd).
+                Most common cause: CoreSimulatorService daemon got wedged. Try in order:
+                  1. Run `\(cmd)` manually to confirm it's the same hang
+                  2. Quit and relaunch the Simulator.app
+                  3. `sudo killall -9 com.apple.CoreSimulator.CoreSimulatorService` (will respawn)
+                  4. `xcrun simctl shutdown all && xcrun simctl boot <udid>`
+                """
         }
     }
 }

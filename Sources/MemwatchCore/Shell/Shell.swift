@@ -17,10 +17,10 @@ public struct ShellResult: Sendable {
 }
 
 public enum Shell {
-    // Default timeout. heap on a busy app can take 10–30s; longer than this is almost
-    // certainly a hang (heap occasionally gets stuck on task_for_pid attach). The timeout
-    // SIGTERMs the child, then SIGKILLs after 5s if it's still alive.
-    public static let defaultTimeoutSeconds: TimeInterval = 60
+    // Default timeout. heap can take 10–30s on a busy app; simctl/pgrep should be
+    // sub-second. 45s gives slow-but-legit operations room while still failing fast
+    // when something genuinely wedged (e.g., CoreSimulatorService daemon stuck).
+    public static let defaultTimeoutSeconds: TimeInterval = 45
 
     public static func run(
         _ executable: String,
@@ -39,18 +39,36 @@ public enum Shell {
         try process.run()
 
         let didTimeOut = TimeoutFlag()
-        let timeoutTask = Task { [process] in
+        // Detached so it runs on its own background thread regardless of the
+        // cooperative-pool state (the parent task suspends on the pipe-drain await).
+        let timeoutTask = Task.detached { [process, outPipe, errPipe] in
             try? await Task.sleep(for: .seconds(timeout))
             if Task.isCancelled { return }
             guard process.isRunning else { return }
+
             didTimeOut.set()
-            process.terminate()  // SIGTERM
-            try? await Task.sleep(for: .seconds(5))
+            let pid = process.processIdentifier
+            FileHandle.standardError.write(Data(
+                "memwatch: shell timeout after \(Int(timeout))s on \(executable) (pid \(pid)) — killing\n".utf8
+            ))
+
+            // SIGTERM first.
+            process.terminate()
+            try? await Task.sleep(for: .seconds(2))
+
+            // SIGKILL if still alive.
             if process.isRunning {
                 #if canImport(Darwin)
-                kill(process.processIdentifier, SIGKILL)
+                kill(pid, SIGKILL)
                 #endif
             }
+
+            // CRITICAL: even after the immediate child dies, grandchildren that
+            // inherited the pipe write FDs (e.g., xcrun → simctl → CoreSimulatorService
+            // chatter) keep the pipes open, so readToEnd() never sees EOF. Close the
+            // read ends from our side to force the reader tasks to unblock.
+            try? outPipe.fileHandleForReading.close()
+            try? errPipe.fileHandleForReading.close()
         }
 
         async let stdoutData = readAll(outPipe.fileHandleForReading)
