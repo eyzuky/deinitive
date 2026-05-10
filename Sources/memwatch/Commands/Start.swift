@@ -89,6 +89,13 @@ struct Start: AsyncParsableCommand {
                 print("clean round trip — no class delta between baseline and after.")
             }
         } else {
+            // "Probably your code" pulled from the post-filter, pre-top-cap set so a
+            // small user-code leak isn't hidden below the --top fold.
+            if let userSection = DiffFormatter.formatUserCodeSection(allDeltas) {
+                print(userSection)
+                print("")
+            }
+
             let colorize: Bool? = noColor ? false : nil
             print(DiffFormatter.format(displayed, colorize: colorize))
             var notes: [String] = []

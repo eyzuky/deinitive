@@ -111,6 +111,35 @@ public enum DiffFormatter {
         guard maxChars > 1, name.count > maxChars else { return name }
         return String(name.prefix(maxChars - 1)) + "…"
     }
+
+    // Renders a small "Probably your code (N classes):" block listing classes whose
+    // names look user-defined (no framework prefix). Returns nil if there's nothing
+    // to surface. The caller prints this above the main diff table so the user's
+    // own leaks don't get lost in the framework long tail.
+    public static func formatUserCodeSection(_ deltas: [ClassDelta], maxClassNameWidth: Int = defaultMaxClassNameWidth) -> String? {
+        let user = deltas.filter { UserCodeHeuristic.isLikelyUserCode($0.className) }
+        guard !user.isEmpty else { return nil }
+
+        let truncated = user.map { truncate($0.className, to: maxClassNameWidth) }
+        let counts = user.map { formatCount($0.countDelta) }
+        let bytes = user.map { BytesFormatter.format($0.bytesDelta, signed: true) }
+
+        let nameWidth = truncated.map { $0.count }.max() ?? 0
+        let countWidth = counts.map { $0.count }.max() ?? 0
+        let bytesWidth = bytes.map { $0.count }.max() ?? 0
+
+        var lines: [String] = []
+        let label = user.count == 1 ? "Probably your code (1 class):" : "Probably your code (\(user.count) classes):"
+        lines.append(label)
+        for i in user.indices {
+            lines.append(
+                "  " + truncated[i].padded(toRight: nameWidth)
+                    + "  " + counts[i].padded(toLeft: countWidth)
+                    + "  " + bytes[i].padded(toLeft: bytesWidth)
+            )
+        }
+        return lines.joined(separator: "\n")
+    }
 }
 
 public extension String {

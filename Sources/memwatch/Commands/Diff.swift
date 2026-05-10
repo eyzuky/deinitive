@@ -58,6 +58,13 @@ struct Diff: AsyncParsableCommand {
             return
         }
 
+        // "Probably your code" section pulled from the post-filter, pre-top-cap set so
+        // a small (low-bytes) user-code leak doesn't get hidden below the --top fold.
+        if let userSection = DiffFormatter.formatUserCodeSection(allDeltas) {
+            print(userSection)
+            print("")
+        }
+
         let colorize: Bool? = noColor ? false : nil
         print(DiffFormatter.format(displayed, colorize: colorize))
         printFooter(frameworkHidden: frameworkHidden, belowFold: belowFold)
