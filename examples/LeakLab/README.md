@@ -1,6 +1,6 @@
 # LeakLab
 
-Companion test app for memwatch. Five flows, each demonstrating a distinct memory-issue archetype with a per-screen toggle to flip between broken and fixed behavior. Use it to verify memwatch surfaces real leaks (and doesn't false-positive when you fix them).
+Companion test app for deinitive. Five flows, each demonstrating a distinct memory-issue archetype with a per-screen toggle to flip between broken and fixed behavior. Use it to verify deinitive surfaces real leaks (and doesn't false-positive when you fix them).
 
 ## demos
 
@@ -27,12 +27,12 @@ open LeakLab.xcodeproj
 
 Hit Run on an iPhone simulator (iOS 17+).
 
-## verify with memwatch
+## verify with deinitive
 
-From the **repo root** (so `.memwatch/snapshots/` lives there):
+From the **repo root** (so `.deinitive/snapshots/` lives there):
 
 ```
-memwatch start --bundle com.memwatch.LeakLab
+deinitive start --bundle com.deinitive.LeakLab
 ```
 
 `start` walks you through three prompts:
@@ -41,7 +41,7 @@ memwatch start --bundle com.memwatch.LeakLab
 2. *Navigate into the flow* — tap demo 1 (Closure cycle), leave the switch **OFF**, tap Trigger 3 times, hit Enter.
 3. *Navigate back to the baseline screen* — tap back to the menu, hit Enter.
 
-memwatch prints the round-trip diff. Expected (broken mode): `ChildVM +3`, `ClosureCycleViewController +1`, `Closure +N` near the top. Console prints zero `ChildVM deinit` lines.
+deinitive prints the round-trip diff. Expected (broken mode): `ChildVM +3`, `ClosureCycleViewController +1`, `Closure +N` near the top. Console prints zero `ChildVM deinit` lines.
 
 Now run `start` again, but this time flip the **Apply fix** switch on inside the demo before tapping Trigger. The diff should show no positive delta on those classes; the console should print 3× `ChildVM deinit` and 1× `ClosureCycleViewController deinit`.
 
@@ -52,16 +52,16 @@ Same procedure works for the other four demos — substitute their leak-tracker 
 `start` writes to fixed tags `start-baseline`, `start-peak`, `start-post` (overwrites each run). To inspect a previous session without re-walking the flow:
 
 ```
-memwatch diff start-baseline start-post
-memwatch diff start-baseline start-peak    # what loading the flow cost
+deinitive diff start-baseline start-post
+deinitive diff start-baseline start-peak    # what loading the flow cost
 ```
 
 ## why not just use Instruments
 
-Each round trip in Instruments is: launch with profiler, mark generation, navigate, mark generation, navigate back, mark generation, click into diff. memwatch is two shell commands. When you're hunting one cycle through 30 attempts, the difference is significant.
+Each round trip in Instruments is: launch with profiler, mark generation, navigate, mark generation, navigate back, mark generation, click into diff. deinitive is two shell commands. When you're hunting one cycle through 30 attempts, the difference is significant.
 
 ## not in scope
 
 - Device support (simulator only)
-- Tests inside LeakLab (the leaks are the tests; memwatch verifies them)
+- Tests inside LeakLab (the leaks are the tests; deinitive verifies them)
 - Glossy UI / launch-screen art / app icon design

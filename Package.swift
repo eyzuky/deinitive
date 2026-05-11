@@ -2,30 +2,30 @@
 import PackageDescription
 
 let package = Package(
-    name: "memwatch",
+    name: "deinitive",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "memwatch", targets: ["memwatch"]),
-        .library(name: "MemwatchCore", targets: ["MemwatchCore"]),
-        .library(name: "MemwatchMCP", targets: ["MemwatchMCP"]),
+        .executable(name: "deinitive", targets: ["deinitive"]),
+        .library(name: "DeinitiveCore", targets: ["DeinitiveCore"]),
+        .library(name: "DeinitiveMCP", targets: ["DeinitiveMCP"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         .executableTarget(
-            name: "memwatch",
+            name: "deinitive",
             dependencies: [
-                "MemwatchCore",
-                "MemwatchMCP",
+                "DeinitiveCore",
+                "DeinitiveMCP",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
-        .target(name: "MemwatchCore"),
-        .target(name: "MemwatchMCP", dependencies: ["MemwatchCore"]),
+        .target(name: "DeinitiveCore"),
+        .target(name: "DeinitiveMCP", dependencies: ["DeinitiveCore"]),
         .testTarget(
-            name: "MemwatchCoreTests",
-            dependencies: ["MemwatchCore"],
+            name: "DeinitiveCoreTests",
+            dependencies: ["DeinitiveCore"],
             resources: [.copy("Fixtures")]
         ),
     ]

@@ -1,0 +1,20 @@
+Process 49281: 2847 nodes malloced for 8124 KB
+Process 49281: heap structure for deinitive-test [49281]
+
+DefaultMallocZone_0x100008000 ====================
+Total size: 6234 KB
+Number of regions: 12
+
+All zones: 2847 nodes (8316928 bytes)
+
+       COUNT    BYTES  AVG   CLASS_NAME
+       =====    =====  ===   ==========
+         482  983040   2.0K  CFString
+         247  198400   812   SCNNode
+         187  12016    64    UIView
+         154  9856     64    NSConcreteMutableData
+          18  89344    4.9K  SCNGeometry
+          12  124928   10.2K GhostController
+           8  4096     512   NSDictionary
+           3  12288    4.0K  UIImage
+           1  256      256   NSObject

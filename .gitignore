@@ -1,6 +1,6 @@
 .build/
 .swiftpm/
-.memwatch/
+.deinitive/
 DerivedData/
 .DS_Store
 .claude/

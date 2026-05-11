@@ -20,7 +20,7 @@ targets:
       - path: LeakLab
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.memwatch.LeakLab
+        PRODUCT_BUNDLE_IDENTIFIER: com.deinitive.LeakLab
         PRODUCT_NAME: LeakLab
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: LeakLab/Info.plist

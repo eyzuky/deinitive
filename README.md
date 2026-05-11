@@ -1,4 +1,4 @@
-# memwatch
+# deinitive
 
 [![Swift 5.10+](https://img.shields.io/badge/Swift-5.10+-orange.svg)](https://swift.org)
 [![macOS 14+](https://img.shields.io/badge/macOS-14+-blue.svg)](#)
@@ -8,10 +8,10 @@
 iOS simulator memory profiling in two commands. Snapshot the heap, navigate, snapshot again, diff. Plus an MCP server so coding agents (Cursor, Claude Code) can hunt leaks alongside reading your source.
 
 <!-- demo GIF — record per the script in examples/LeakLab/README.md and replace this line -->
-<!-- ![demo](docs/memwatch-demo.gif) -->
+<!-- ![demo](docs/deinitive-demo.gif) -->
 
 ```
-$ memwatch start --bundle com.example.app
+$ deinitive start --bundle com.example.app
 
 Step 1 of 3 — go to the baseline screen — the place you'll start and end the round trip.
 Press Enter when ready: 
@@ -26,7 +26,7 @@ Press Enter when ready:
 captured 1264 classes (8.4 MB)
 
 ════════════════════════════════════════════════════════════════
-memwatch start: round-trip residue (baseline → after)
+deinitive start: round-trip residue (baseline → after)
 ════════════════════════════════════════════════════════════════
 
 ▸ Probably your code (2 classes)
@@ -50,26 +50,26 @@ ChildVM                            +3    +96 B
                                        +431 KB
 ```
 
-`memwatch start` walks you through a baseline → flow → back round trip and prints what didn't release. The "Probably your code" section pulls user-defined classes out of the noise so you don't squint past 200 rows of `NSConcreteMutableData` churn.
+`deinitive start` walks you through a baseline → flow → back round trip and prints what didn't release. The "Probably your code" section pulls user-defined classes out of the noise so you don't squint past 200 rows of `NSConcreteMutableData` churn.
 
 ## install
 
 ### Homebrew (recommended)
 
 ```
-brew install eyzuky/memwatch/memwatch
+brew install eyzuky/deinitive/deinitive
 ```
 
 ### Prebuilt binary
 
-Download `memwatch-v0.1.0-arm64.tar.gz` from [Releases](https://github.com/eyzuky/memwatch/releases) and copy to `/opt/homebrew/bin/`.
+Download `deinitive-v0.1.0-arm64.tar.gz` from [Releases](https://github.com/eyzuky/deinitive/releases) and copy to `/opt/homebrew/bin/`.
 
 ### From source
 
 ```
-git clone https://github.com/eyzuky/memwatch && cd memwatch
+git clone https://github.com/eyzuky/deinitive && cd deinitive
 swift build -c release
-cp .build/release/memwatch /opt/homebrew/bin/
+cp .build/release/deinitive /opt/homebrew/bin/
 ```
 
 Requires macOS 14+ (Apple Silicon) and Xcode Command Line Tools (`xcode-select --install`).
@@ -79,19 +79,19 @@ Requires macOS 14+ (Apple Silicon) and Xcode Command Line Tools (`xcode-select -
 `start` is the recommended workflow. The lower-level subcommands let you script your own captures or diff older snapshots:
 
 ```
-memwatch start <flags>                         # interactive: baseline → flow → back, then auto-diff
-memwatch snapshot --tag <name> --bundle <id> [--simulator <udid>]
-memwatch diff <before> <after> [--no-color] [--all] [--top N]
-memwatch list
-memwatch clear [--yes]
-memwatch mcp --bundle <id> [--simulator <udid>] [--log-stderr]
+deinitive start <flags>                         # interactive: baseline → flow → back, then auto-diff
+deinitive snapshot --tag <name> --bundle <id> [--simulator <udid>]
+deinitive diff <before> <after> [--no-color] [--all] [--top N]
+deinitive list
+deinitive clear [--yes]
+deinitive mcp --bundle <id> [--simulator <udid>] [--log-stderr]
 ```
 
-`memwatch start` flags: `--bundle <id>` (required), `--simulator <udid>`, `--no-color`, `--all`, `--top N` (default 20, 0 = unlimited).
+`deinitive start` flags: `--bundle <id>` (required), `--simulator <udid>`, `--no-color`, `--all`, `--top N` (default 20, 0 = unlimited).
 
-Snapshots persist under `.memwatch/snapshots/` in the current directory. Each is a small JSON file you can commit, share, or delete. `start` always writes to `start-baseline`, `start-peak`, `start-post` — you can re-run a manual `memwatch diff start-baseline start-post` any time without re-walking the flow.
+Snapshots persist under `.deinitive/snapshots/` in the current directory. Each is a small JSON file you can commit, share, or delete. `start` always writes to `start-baseline`, `start-peak`, `start-post` — you can re-run a manual `deinitive diff start-baseline start-post` any time without re-walking the flow.
 
-`diff` filters out a curated set of iOS framework warmup classes (Auto Layout solver, glyph caches, Obj-C runtime metadata, render-tree internals, etc.) so the signal-to-noise ratio is workable out of the box, and shows only the top 20 rows by `abs(ΔBytes)`. Class names over 50 chars are truncated. Pass `--all` to disable the noise filter, `--top 0` to remove the row cap. The same filter and cap apply to the `memwatch_diff` and `memwatch_current` MCP tools (`all: true`, `top: 0`).
+`diff` filters out a curated set of iOS framework warmup classes (Auto Layout solver, glyph caches, Obj-C runtime metadata, render-tree internals, etc.) so the signal-to-noise ratio is workable out of the box, and shows only the top 20 rows by `abs(ΔBytes)`. Class names over 50 chars are truncated. Pass `--all` to disable the noise filter, `--top 0` to remove the row cap. The same filter and cap apply to the `deinitive_diff` and `deinitive_current` MCP tools (`all: true`, `top: 0`).
 
 ## MCP
 
@@ -100,8 +100,8 @@ Add to `~/.cursor/mcp.json` (or your agent's equivalent):
 ```json
 {
   "mcpServers": {
-    "memwatch": {
-      "command": "/opt/homebrew/bin/memwatch",
+    "deinitive": {
+      "command": "/opt/homebrew/bin/deinitive",
       "args": ["mcp", "--bundle", "com.example.app"]
     }
   }
@@ -110,12 +110,12 @@ Add to `~/.cursor/mcp.json` (or your agent's equivalent):
 
 Tools exposed:
 
-- `memwatch_snapshot(tag, bundle?)`
-- `memwatch_diff(before, after, all?)`
-- `memwatch_current(bundle?, all?)` — top-20 allocators, no persistence
-- `memwatch_leaks(bundle?)` — raw `leaks` output
+- `deinitive_snapshot(tag, bundle?)`
+- `deinitive_diff(before, after, all?)`
+- `deinitive_current(bundle?, all?)` — top-20 allocators, no persistence
+- `deinitive_leaks(bundle?)` — raw `leaks` output
 
-`bundle` defaults to whatever was passed via `--bundle` on `memwatch mcp`; tool calls can override per-invocation. The server pins MCP protocol version `2025-11-25` and logs to stderr only when `--log-stderr` is set.
+`bundle` defaults to whatever was passed via `--bundle` on `deinitive mcp`; tool calls can override per-invocation. The server pins MCP protocol version `2025-11-25` and logs to stderr only when `--log-stderr` is set.
 
 ## try it on the bundled demo app
 
@@ -127,7 +127,7 @@ brew install xcodegen
 xcodegen generate
 open LeakLab.xcodeproj
 # Hit Run on an iPhone simulator, then from the repo root:
-memwatch start --bundle com.memwatch.LeakLab
+deinitive start --bundle com.deinitive.LeakLab
 # Follow the prompts: menu → tap demo + Trigger → back to menu
 ```
 
@@ -137,7 +137,7 @@ Full instructions in [examples/LeakLab/README.md](./examples/LeakLab/README.md).
 
 - Simulator only — no device support. Devices need entitlements and a different attach flow.
 - Requires the app to already be running in a booted simulator.
-- `heap` and `leaks` are macOS-only tools, so memwatch itself is macOS-only.
+- `heap` and `leaks` are macOS-only tools, so deinitive itself is macOS-only.
 
 ## license
 
